@@ -1,0 +1,5 @@
+JE	881982	07/31/2026	7	26	86347162	07/31/2026	AA	 	sundarn1      	    35013013	11111 	        	        	100	TestJE1	Test1	03501	G 	AUD	0	10	 	P	                         	APACE1BMC 	Standard Adjustment
+JE	881982	07/31/2026	7	26	86347162	07/31/2026	AA	 	sundarn1	    35010806	11122 	        	        	-80	TestJE1	Test1	03501	G 	AUD	0	20	 	P	                         	APACE1BMC 	Standard Adjustment
+JE	881982	07/31/2026	7	26	86347162	07/31/2026	AA	 	sundarn1  	    35010806	11123 	        	        	-20	TestJE1	Test1	03501	G 	AUD	0	30	 	P	                         	APACE1BMC 	Standard Adjustment
+JE	881983	07/31/2026	7	26	86347164	07/31/2026	AA	 	sundarn1  	    35013006	11124 	        	        	200.55	TestJE2	Test2	03501	G 	AUD	0	20	 	P	                         	APACE1BMC 	Standard Adjustment
+JE	881983	07/31/2026	7	26	86347164	07/31/2026	AA	 	sundarn1  	    35013006	11125 	        	        	-200.55	TestJE2	Test2	03501	G 	AUD	0	10	 	P	                         	APACE1BMC 	Standard Adjustment
