@@ -189,7 +189,7 @@ Next.js + React + TypeScript + MUI + MUI DataGrid
                         v
 +------------------------------------------------+
 |                    FastAPI                     |
-| Controllers, Use Cases, Validation, Auth       |
+| Controllers, Application Services, Validation, Auth       |
 +-----------------------+------------------------+
                         |
                         v
@@ -606,7 +606,7 @@ BLPREPARER -> PREPARER_RECONCILER
 BLAPPROVER -> APPROVER
 ```
 
-If upstream sends `BLAPPOVER`, normalize it to `BLAPPROVER` before applying the mapping.
+
 
 ### 10.4 Admin Dependency Mapping Screen
 
@@ -1799,7 +1799,7 @@ External role code from JDE/dependency area: BLAPPROVER
 Internal role code: APPROVER
 ```
 
-Note: If the upstream system uses the spelling `BLAPPOVER`, treat it as an accepted alias and normalize it to `BLAPPROVER` during load or seed setup.
+
 
 ```sql
 CREATE TABLE role_external_mapping (
@@ -1830,7 +1830,7 @@ INSERT INTO role_external_mapping (
 ) VALUES
 ('REM-BLPREPARER', 'BLPREPARER', 'BLPREPARER', 'PREPARER_RECONCILER', 'JDE', 'JDE preparer role mapped to application Preparer/Reconciler role'),
 ('REM-BLAPPROVER', 'BLAPPROVER', 'BLAPPROVER', 'APPROVER', 'JDE', 'JDE approver role mapped to application Approver role'),
-('REM-BLAPPOVER-ALIAS', 'BLAPPOVER', 'BLAPPROVER', 'APPROVER', 'JDE', 'Accepted typo/alias normalized to BLAPPROVER');
+
 ```
 
 ---
@@ -2019,21 +2019,21 @@ backend/
 │   │   │   ├── document_dto.py
 │   │   │   └── currency_rate_dto.py
 │   │   │
-│   │   └── use_cases/
-│   │       ├── demo_login_usecase.py
-│   │       ├── get_logged_in_user_usecase.py
-│   │       ├── switch_active_role_usecase.py
-│   │       ├── upload_journal_file_usecase.py
-│   │       ├── get_work_queue_by_period_usecase.py
-│   │       ├── get_journal_detail_usecase.py
-│   │       ├── certify_journal_usecase.py
-│   │       ├── reject_journal_usecase.py
-│   │       ├── upload_journal_document_usecase.py
-│   │       ├── download_journal_document_usecase.py
-│   │       ├── preview_journal_document_usecase.py
-│   │       ├── add_journal_comment_usecase.py
-│   │       ├── add_journal_hyperlink_usecase.py
-│   │       └── get_currency_rates_usecase.py
+│   │   └── services/
+│   │       ├── demo_login_service.py
+│   │       ├── get_logged_in_user_service.py
+│   │       ├── switch_active_role_service.py
+│   │       ├── upload_journal_file_service.py
+│   │       ├── get_work_queue_by_period_service.py
+│   │       ├── get_journal_detail_service.py
+│   │       ├── certify_journal_service.py
+│   │       ├── reject_journal_service.py
+│   │       ├── upload_journal_document_service.py
+│   │       ├── download_journal_document_service.py
+│   │       ├── preview_journal_document_service.py
+│   │       ├── add_journal_comment_service.py
+│   │       ├── add_journal_hyperlink_service.py
+│   │       └── get_currency_rates_service.py
 │   │
 │   ├── infrastructure/
 │   │   ├── database/
@@ -2068,9 +2068,7 @@ backend/
 │   └── seed_currency_rates.sql
 ├── .env.example
 ├── requirements.txt
-├── Dockerfile
-└── docker-compose.yml
-```
+└── ```
 
 ---
 
@@ -2642,7 +2640,7 @@ Keep grid immutable
 23. Approver must be resolved from dependency mapping using Preparer ADID.
 24. External role code `BLPREPARER` maps to internal role `PREPARER_RECONCILER`.
 25. External role code `BLAPPROVER` maps to internal role `APPROVER`.
-26. If upstream sends `BLAPPOVER`, normalize it to `BLAPPROVER`.
+26. If upstream sends `BLAPPROVER`, normalize it to `BLAPPROVER`.
 27. Admin dependency mapping screen must be viewable by `LOCAL_ADMIN`.
 28. Dependency mapping screen filters must be UI-only and must not hit the database.
 29. Admin file upload must be a two-step process: Upload first, Parse second.
@@ -2650,7 +2648,25 @@ Keep grid immutable
 31. `PARSE_FAILED` must not create journal headers, lines, or assignments.
 32. Use explicit transaction handling: flush first, commit only if flush succeeds, rollback on any validation or database failure.
 33. Admin must receive notifications for Parsing, Parse Success, and Parse Failed.
-34. Future SFTP/S3/JDE integrations should be added through new infrastructure implementations without changing core workflow logic.
+34. Preparer/Reconciler decertify must revert `PENDING_APPROVER` back to `PENDING_PREPARER` and return the journal to the Preparer/Reconciler queue.
+35. Approver has only Certify/Approve and Reject actions in Phase 1.
+36. Approver approval closes the journal.
+37. Approver rejection sends the journal back to the Preparer/Reconciler queue for review and recertification.
+38. Main data grids must support client-side pagination.
+39. Filtering and sorting must be applied before pagination.
+40. Certify, Approve, Reject, and Decertify actions must always create audit trail records.
+41. If audit logging fails, the full workflow action must rollback.
+42. Audit trail must show who acted, active role, old status, new status, action, comments/reason, and timestamp.
+43. All protected APIs must require JWT Bearer token authentication.
+44. Active role must be stored in JWT and validated against `user_session`.
+45. Role switch must be backend-validated and must issue a new access token.
+46. Frontend route guards are required but are not sufficient without backend authorization.
+47. Journal actions must validate both active role and journal assignment.
+48. All API failures must return structured error responses with error code, message, severity, details, and correlation ID.
+49. UI must show proper popup/toast/dialog messages and must never show raw stack traces.
+50. Error codes, success codes, and info codes must be centralized as enums.
+51. Frontend must use a shared notification module instead of hardcoded page-level messages.
+52. Future SFTP/S3/JDE integrations should be added through new infrastructure implementations without changing core workflow logic.
 
 ---
 
@@ -3776,7 +3792,7 @@ Test names
 Test data
 Mock data
 Environment variable names
-Docker files
+runtime packaging files
 Package names
 Folder names
 Git branch names if possible
@@ -4124,11 +4140,3039 @@ Column filters appear beneath each column header.
 Filter text boxes match column width.
 Grid density is compact and enterprise-like.
 Cert/View/Decertify render as row-level action links.
+Grid pagination appears on all main grids and works on the client-side filtered dataset.
 Journal detail sections follow the same sequence as the reference screenshots.
 Supporting documents have icon + document name behavior.
 CSS is modular and page/module-owned.
 No external product name appears anywhere in UI or codebase.
 W3C id/name/label/accessibility rules are followed.
+```
+
+
+---
+
+## 31. Decertify, Rejection, Approval, and Pagination Rules
+
+This section explicitly defines the final Phase 1 workflow behavior for Preparer/Reconciler decertification, Approver approval/rejection, and grid pagination.
+
+### 31.1 Preparer/Reconciler Decertify Rule
+
+Preparer/Reconciler can decertify only after the journal has been certified by the Preparer/Reconciler and sent to the Approver, but before the Approver has approved or rejected it.
+
+Allowed status for Preparer/Reconciler decertify:
+
+```text
+PENDING_APPROVER
+```
+
+When Preparer/Reconciler clicks `Decertify`:
+
+```text
+Journal is pulled back from the Approver queue.
+Approver assignment is no longer actionable.
+Preparer/Reconciler assignment is reopened.
+Journal status is reverted to PENDING_PREPARER.
+Journal appears again in Preparer/Reconciler dashboard grid for the same period.
+Preparer/Reconciler can review, update comments/documents/hyperlinks, and certify again.
+A decertification record is inserted.
+An audit log is inserted.
+```
+
+Recommended status transition:
+
+```text
+PENDING_APPROVER
+        |
+        | Preparer/Reconciler clicks Decertify
+        v
+PENDING_PREPARER
+```
+
+Recommended assignment transition:
+
+```text
+Preparer/Reconciler assignment: COMPLETED -> ASSIGNED or IN_PROGRESS
+Approver assignment: ASSIGNED -> SKIPPED or ASSIGNED but inactive until recertified
+```
+
+For Phase 1, use this simple approach:
+
+```text
+Preparer/Reconciler assignment = IN_PROGRESS
+Approver assignment = ASSIGNED
+Journal status = PENDING_PREPARER
+```
+
+The Approver dashboard must stop showing the journal immediately after the decertify action because the journal no longer has status `PENDING_APPROVER`.
+
+### 31.2 Preparer/Reconciler Decertify API
+
+```http
+POST /api/v1/journals/{journalId}/decertify
+```
+
+Request:
+
+```json
+{
+  "reason_code": "PREPARER_REVISION_REQUIRED",
+  "comments": "Need to update supporting document before approval."
+}
+```
+
+Response:
+
+```json
+{
+  "journal_id": "JRN001",
+  "previous_status": "PENDING_APPROVER",
+  "current_status": "PENDING_PREPARER",
+  "message": "Journal decertified and returned to Preparer/Reconciler queue."
+}
+```
+
+### 31.3 Preparer/Reconciler Decertify Validation
+
+Before decertifying, backend must validate:
+
+```text
+Logged-in user has active role PREPARER_RECONCILER.
+Logged-in user is assigned as Preparer/Reconciler for the journal.
+Journal status is PENDING_APPROVER.
+Approver has not already certified or rejected the journal.
+Journal is not CLOSED.
+Journal is not already REJECTED.
+Reason/comment is captured if configured as mandatory.
+```
+
+If validation fails, return an error message such as:
+
+```text
+This journal cannot be decertified because it is no longer pending approval.
+```
+
+### 31.4 Approver State Rule
+
+Approver has only two business actions for Phase 1:
+
+```text
+Approve/Certify
+Reject
+```
+
+Approver should not have the same decertify flow as Preparer/Reconciler in Phase 1.
+
+Approver action mapping:
+
+```text
+PENDING_APPROVER -> Certify or Reject
+CLOSED           -> View only
+REJECTED         -> View only
+```
+
+### 31.5 Approver Approval Rule
+
+When Approver certifies/approves:
+
+```text
+Approver certification record is inserted.
+Approver assignment is marked COMPLETED.
+Journal status is updated to CLOSED.
+Audit log is inserted.
+Journal appears in Approver grid as View only if closed records are included for the selected period.
+Journal should not appear in Preparer/Reconciler actionable queue.
+```
+
+Recommended status transition:
+
+```text
+PENDING_APPROVER
+        |
+        | Approver certifies
+        v
+CLOSED
+```
+
+### 31.6 Approver Rejection Rule
+
+When Approver rejects:
+
+```text
+Reject reason is mandatory.
+Comment is mandatory if reason = OTHER, or if configured.
+Rejection certification record is inserted.
+Approver assignment is marked REJECTED.
+Preparer/Reconciler assignment is reopened.
+Journal status is updated to REJECTED.
+Audit log is inserted.
+Journal returns to Preparer/Reconciler dashboard grid for the selected period.
+Preparer/Reconciler can review, update evidence, and certify again.
+```
+
+Recommended status transition:
+
+```text
+PENDING_APPROVER
+        |
+        | Approver rejects
+        v
+REJECTED
+        |
+        | Preparer/Reconciler recertifies
+        v
+PENDING_APPROVER
+```
+
+Recommended assignment transition on rejection:
+
+```text
+Approver assignment: ASSIGNED or IN_PROGRESS -> REJECTED
+Preparer/Reconciler assignment: COMPLETED -> IN_PROGRESS
+```
+
+### 31.7 Dashboard Action Mapping After These Rules
+
+Preparer/Reconciler dashboard action mapping:
+
+```text
+PENDING_PREPARER     -> Cert
+PREPARER_IN_PROGRESS -> Cert
+REJECTED             -> Cert
+PENDING_APPROVER     -> View + Decertify
+CLOSED               -> View
+```
+
+Approver dashboard action mapping:
+
+```text
+PENDING_APPROVER -> Cert
+CLOSED           -> View
+REJECTED         -> View
+```
+
+### 31.8 Pagination Requirement
+
+All main data grids must support pagination similar to the reference screenshots.
+
+Pagination applies to:
+
+```text
+Preparer/Reconciler dashboard grid
+Approver dashboard grid
+Admin uploaded file processing grid
+Admin dependency mapping grid
+Admin currency conversion grid
+Journal line item grid if line count is large
+Audit trail grid if record count is large
+Supporting document grid if document count is large
+```
+
+### 31.9 Pagination Behavior
+
+Period selection loads the period-level dataset from the backend. Pagination is then handled in the UI for Phase 1.
+
+```text
+Period filter -> backend/database hit
+Pagination -> UI only on already-loaded rows
+Column filters -> UI only on already-loaded rows
+Sorting -> UI only on already-loaded rows unless later configured otherwise
+```
+
+Default pagination configuration:
+
+```text
+Default page size: 25
+Allowed page sizes: 10, 25, 50, 100
+Show current page number
+Show total loaded records
+Show range text, for example: Showing 1-25 of 143
+Provide First, Previous, Next, Last controls
+```
+
+### 31.10 Pagination and Filtering Interaction
+
+Filtering must be applied before pagination.
+
+Processing order in UI:
+
+```text
+1. Load rows for selected period from backend.
+2. Apply client-side column filters.
+3. Apply client-side sorting if selected.
+4. Apply pagination to the filtered/sorted rows.
+5. Render current page rows.
+```
+
+Example:
+
+```text
+Loaded period rows: 300
+After column filter: 42
+Page size: 25
+Page 1 shows rows 1-25
+Page 2 shows rows 26-42
+```
+
+### 31.11 Pagination Component Requirement
+
+Create reusable pagination components:
+
+```text
+modules/shared/components/GridPagination.tsx
+modules/shared/styles/GridPagination.module.css
+modules/shared/hooks/useClientPagination.ts
+```
+
+The journal grid should consume pagination like this:
+
+```text
+RoleDashboardGrid
+    -> all period rows
+    -> useJournalLocalFilters
+    -> useClientPagination
+    -> render visible rows
+```
+
+### 31.12 Pagination DOM ids and names
+
+Use stable, meaningful ids and names:
+
+```tsx
+<nav id="journal-grid-pagination" aria-label="Journal grid pagination">
+  <button id="journal-grid-first-page-button" name="firstPageButton" type="button">First</button>
+  <button id="journal-grid-previous-page-button" name="previousPageButton" type="button">Previous</button>
+  <span id="journal-grid-page-range-label">Showing 1-25 of 143</span>
+  <button id="journal-grid-next-page-button" name="nextPageButton" type="button">Next</button>
+  <button id="journal-grid-last-page-button" name="lastPageButton" type="button">Last</button>
+</nav>
+```
+
+### 31.13 Key Rule
+
+```text
+Do not perform database pagination in Phase 1 except for the initial period-level load if the dataset becomes too large later.
+```
+
+For Phase 1, period-level loading plus client-side filtering and pagination keeps the UI simple and close to the reference grid behavior.
+
+
+---
+
+## 32. Mandatory Audit Trail Logging for All Workflow Actions
+
+Every workflow action must be captured in the audit trail. This is mandatory for Phase 1 and should align with the audit/certification trace behavior shown in the provided reference screenshots.
+
+### 32.1 Actions That Must Be Audited
+
+The following actions must always create an audit record:
+
+```text
+Preparer/Reconciler Certify
+Approver Certify / Approve
+Approver Reject
+Preparer/Reconciler Decertify
+Journal file upload
+Journal file parse started
+Journal file parse success
+Journal file parse failed
+Supporting document upload
+Supporting document view/download, optional but recommended
+Comment added
+Hyperlink added
+Role switch, optional but recommended for troubleshooting
+```
+
+For the core certification workflow, these four actions are mandatory:
+
+```text
+CERTIFY
+APPROVE
+REJECT
+DECERTIFY
+```
+
+### 32.2 Audit Trail Principle
+
+The audit trail must answer these questions for every action:
+
+```text
+Who performed the action?
+Which role was active when the action was performed?
+What journal was affected?
+What action was performed?
+What was the old status?
+What is the new status?
+When was the action performed?
+What comments/reason were provided?
+What supporting metadata was captured?
+```
+
+### 32.3 Audit Record Creation Rule
+
+For every successful workflow action, the application must write:
+
+```text
+1. Business transaction update
+2. Certification/action record where applicable
+3. Audit trail record
+4. Commit only if all required records flush successfully
+```
+
+If the audit trail record fails to flush, the full action must rollback.
+
+Required transaction rule:
+
+```text
+No workflow action is complete unless the audit log is successfully written.
+```
+
+### 32.4 Mandatory Audit Events
+
+#### Preparer/Reconciler Certify
+
+When the Preparer/Reconciler certifies:
+
+```text
+Action Type: PREPARER_CERTIFIED
+Old Status: PENDING_PREPARER or REJECTED
+New Status: PENDING_APPROVER
+Performed Role: PREPARER_RECONCILER
+```
+
+Audit message example:
+
+```text
+Journal certified by Preparer/Reconciler and sent for approval.
+```
+
+#### Approver Certify / Approve
+
+When the Approver approves:
+
+```text
+Action Type: APPROVER_CERTIFIED
+Old Status: PENDING_APPROVER
+New Status: CLOSED
+Performed Role: APPROVER
+```
+
+Audit message example:
+
+```text
+Journal approved by Approver and closed.
+```
+
+#### Approver Reject
+
+When the Approver rejects:
+
+```text
+Action Type: APPROVER_REJECTED
+Old Status: PENDING_APPROVER
+New Status: REJECTED
+Performed Role: APPROVER
+```
+
+Audit message example:
+
+```text
+Journal rejected by Approver and returned to Preparer/Reconciler queue.
+```
+
+Mandatory metadata:
+
+```text
+reason_code
+reason_text
+comments
+```
+
+#### Preparer/Reconciler Decertify
+
+When the Preparer/Reconciler decertifies:
+
+```text
+Action Type: PREPARER_DECERTIFIED
+Old Status: PENDING_APPROVER
+New Status: PENDING_PREPARER
+Performed Role: PREPARER_RECONCILER
+```
+
+Audit message example:
+
+```text
+Journal decertified by Preparer/Reconciler and pulled back from approval queue.
+```
+
+Mandatory metadata:
+
+```text
+reason_code
+comments
+previous_approver_assignment_status
+new_approver_assignment_status
+```
+
+### 32.5 Audit Metadata JSON
+
+The `metadata_json` column in `journal_audit_log` should capture supporting information for troubleshooting and audit review.
+
+Example metadata for certify:
+
+```json
+{
+  "journal_id": "JRN001",
+  "assignment_id": "ASN001",
+  "certification_id": "CRT001",
+  "active_role": "PREPARER_RECONCILER",
+  "action_source": "UI",
+  "screen_id": "journal-detail-page",
+  "documents_attached_count": 2,
+  "comments_count": 1
+}
+```
+
+Example metadata for reject:
+
+```json
+{
+  "journal_id": "JRN001",
+  "assignment_id": "ASN002",
+  "certification_id": "CRT002",
+  "active_role": "APPROVER",
+  "reason_code": "MISSING_SUPPORT",
+  "reason_text": "Missing supporting document",
+  "comments": "Please attach the invoice backup.",
+  "action_source": "UI",
+  "screen_id": "journal-detail-page"
+}
+```
+
+### 32.6 Audit Trail UI Section
+
+The Journal Detail page must include an Audit Trail or Certification Details section similar to the reference screenshot behavior.
+
+Recommended columns:
+
+```text
+Action
+Status From
+Status To
+Performed By
+Performed Role
+Performed At
+Reason
+Comments
+```
+
+For each journal, the Audit Trail section should show events in descending order by date/time, newest first.
+
+Default behavior:
+
+```text
+Show latest 10 audit events.
+Allow pagination if more events exist.
+```
+
+### 32.7 Audit Trail API
+
+Use this endpoint to retrieve audit trail records:
+
+```http
+GET /api/v1/journals/{journalId}/audit
+```
+
+Response should include:
+
+```json
+{
+  "journal_id": "JRN001",
+  "records": [
+    {
+      "audit_id": "AUD001",
+      "action_type": "PREPARER_CERTIFIED",
+      "old_status": "PENDING_PREPARER",
+      "new_status": "PENDING_APPROVER",
+      "performed_by": "USR001",
+      "performed_by_name": "Demo Preparer",
+      "performed_role": "PREPARER_RECONCILER",
+      "message": "Journal certified by Preparer/Reconciler and sent for approval.",
+      "created_at": "2026-08-19T10:30:00Z"
+    }
+  ]
+}
+```
+
+### 32.8 Transaction Pattern for Workflow Actions
+
+All workflow action application services must follow this structure:
+
+```python
+async def certify_journal(journal_id: str, current_user: CurrentUser):
+    async with session.begin():
+        try:
+            journal = await journal_repository.get_for_update(journal_id)
+            old_status = journal.status
+
+            # Validate active role, assignment, and current status.
+            workflow_service.validate_certify(journal, current_user)
+
+            # Update business state.
+            journal.status = JournalStatus.PENDING_APPROVER
+            await assignment_repository.mark_completed(journal_id, current_user.user_id)
+
+            # Insert certification record.
+            certification = JournalCertification(...)
+            await certification_repository.save(certification)
+
+            # Insert audit trail record.
+            audit = JournalAuditLog(
+                journal_id=journal_id,
+                action_type="PREPARER_CERTIFIED",
+                old_status=old_status,
+                new_status=journal.status,
+                performed_by=current_user.user_id,
+                performed_role=current_user.active_role,
+                message="Journal certified by Preparer/Reconciler and sent for approval.",
+            )
+            await audit_repository.save(audit)
+
+            # Flush all changes before commit.
+            await session.flush()
+            # Commit happens when context exits successfully.
+
+        except Exception:
+            await session.rollback()
+            raise
+```
+
+### 32.9 Audit Failure Rule
+
+If audit insert fails:
+
+```text
+Rollback the certification/rejection/decertification action.
+Show a proper error message to the user.
+Do not leave the journal in a partially updated state.
+```
+
+Recommended error message:
+
+```text
+Action could not be completed because audit logging failed. Please retry or contact support.
+```
+
+### 32.10 UI Notification After Audited Actions
+
+After the transaction commits successfully, show a success notification:
+
+```text
+Certified successfully.
+Approved successfully.
+Rejected successfully and returned to Preparer/Reconciler queue.
+Decertified successfully and returned to Preparer/Reconciler queue.
+```
+
+If any part fails before commit, show an error notification:
+
+```text
+Action failed. No changes were saved.
+```
+
+### 32.11 Audit Trail Acceptance Criteria
+
+A workflow action is acceptable only if:
+
+```text
+The journal status changed correctly.
+The assignment status changed correctly.
+The certification/rejection/decertification record was created.
+The audit trail record was created.
+The user received a success notification.
+The Audit Trail section displays the event.
+If any step failed, all changes were rolled back.
+```
+
+
+---
+
+## 33. Security Architecture: JWT Bearer Token, Session Management, and Authorization
+
+Phase 1 must include proper authentication and authorization even though enterprise SSO is deferred. The application must not rely only on frontend route hiding because any user can manually type a URL and attempt to access restricted pages.
+
+Security principle:
+
+```text
+Authentication confirms who the user is.
+Authorization confirms what the user is allowed to do.
+```
+
+A user may be authenticated but still not authorized to:
+
+```text
+Open Admin pages
+Upload JDE journal files
+View dependency mappings
+View currency conversion screen
+Certify a journal not assigned to them
+Approve a journal not assigned to them
+View another user's restricted journal task
+```
+
+### 33.1 Phase 1 Authentication Model
+
+Use JWT Bearer Token authentication for Phase 1 demo login.
+
+Login endpoint:
+
+```http
+POST /api/v1/auth/login
+```
+
+Successful response:
+
+```json
+{
+  "access_token": "<jwt-access-token>",
+  "refresh_token": "<jwt-refresh-token>",
+  "token_type": "Bearer",
+  "expires_in": 3600
+}
+```
+
+All secured API requests must include:
+
+```http
+Authorization: Bearer <jwt-access-token>
+```
+
+### 33.2 JWT Payload
+
+The access token should include only the minimum required identity and authorization context.
+
+Recommended JWT claims:
+
+```json
+{
+  "sub": "USR001",
+  "adid": "SUNDARN1",
+  "display_name": "Demo User One",
+  "email": "demo.user1@example.com",
+  "active_role": "PREPARER_RECONCILER",
+  "session_id": "SES001",
+  "iat": 1780000000,
+  "exp": 1780003600
+}
+```
+
+Do not store sensitive data such as password hashes or confidential profile details inside the JWT.
+
+### 33.3 Refresh Token
+
+Use a refresh token so the user does not need to log in again while actively working.
+
+Refresh endpoint:
+
+```http
+POST /api/v1/auth/refresh-token
+```
+
+Request:
+
+```json
+{
+  "refresh_token": "<jwt-refresh-token>"
+}
+```
+
+Response:
+
+```json
+{
+  "access_token": "<new-jwt-access-token>",
+  "token_type": "Bearer",
+  "expires_in": 3600
+}
+```
+
+Recommended Phase 1 token timings:
+
+```text
+Access token validity: 30 to 60 minutes
+Refresh token validity: 8 to 12 hours for demo usage
+```
+
+### 33.4 Active Role Switch Must Issue a New Token
+
+When a user switches active role from the top-right dropdown, the change must not be done only in React state. The backend must validate the role and issue a new JWT with the updated active role.
+
+Endpoint:
+
+```http
+POST /api/v1/auth/switch-role
+```
+
+Request:
+
+```json
+{
+  "role_code": "APPROVER"
+}
+```
+
+Backend behavior:
+
+```text
+Validate JWT.
+Validate session is active.
+Validate requested role belongs to the logged-in user.
+Update user_session.active_role_code.
+Issue a new access token with active_role = requested role.
+Return the updated token and user context.
+```
+
+Response:
+
+```json
+{
+  "access_token": "<new-jwt-access-token>",
+  "token_type": "Bearer",
+  "active_role": "APPROVER",
+  "roles": [
+    "PREPARER_RECONCILER",
+    "APPROVER"
+  ]
+}
+```
+
+### 33.5 Session Validation
+
+The existing `user_session` table must be used to validate active sessions.
+
+Every secured API request should validate:
+
+```text
+JWT signature is valid.
+JWT is not expired.
+session_id exists in user_session.
+user_session.is_active = true.
+user_session.expires_at is not expired.
+active_role in JWT matches active_role_code in user_session.
+user still has the active role in user_roles.
+```
+
+If any validation fails, return:
+
+```http
+401 Unauthorized
+```
+
+or
+
+```http
+403 Forbidden
+```
+
+depending on the failure.
+
+### 33.6 Authorization Layers
+
+Authorization must be enforced in three layers.
+
+#### Layer 1: Frontend Route Guard
+
+Frontend route guards prevent users from casually navigating to unauthorized pages.
+
+Examples:
+
+```text
+/admin/upload-journal requires LOCAL_ADMIN
+/admin/dependency-mapping requires LOCAL_ADMIN
+/admin/currency-rates requires LOCAL_ADMIN
+/journals requires PREPARER_RECONCILER or APPROVER
+```
+
+If the user is not authorized, redirect to:
+
+```text
+/no-access
+```
+
+or show:
+
+```text
+Access denied
+```
+
+#### Layer 2: Backend API Role Authorization
+
+Every API endpoint must validate the required role. Frontend checks are not sufficient.
+
+Example role rules:
+
+```text
+Upload JDE file: LOCAL_ADMIN only
+Parse JDE file: LOCAL_ADMIN only
+View dependency mapping: LOCAL_ADMIN only
+View currency conversion: LOCAL_ADMIN only
+Work queue: PREPARER_RECONCILER or APPROVER based on active role
+Certify as Preparer/Reconciler: PREPARER_RECONCILER only
+Certify/Reject as Approver: APPROVER only
+Decertify as Preparer/Reconciler: PREPARER_RECONCILER only
+```
+
+Recommended backend pattern:
+
+```python
+@router.post("/journal-files/{file_load_id}/parse")
+async def parse_file(
+    file_load_id: str,
+    current_user: CurrentUser = Depends(require_role(RoleCode.LOCAL_ADMIN)),
+):
+    ...
+```
+
+#### Layer 3: Journal Assignment Authorization
+
+Role alone is not enough. The user must also be assigned to the specific journal.
+
+Example:
+
+```text
+A user with APPROVER role cannot approve every journal.
+A user can approve only journals where journal_assignment.role_code = APPROVER and journal_assignment.assigned_user_id = logged-in user.
+```
+
+Required validation for journal actions:
+
+```text
+Check active role.
+Check journal status.
+Check assignment exists for journal_id + active_role + logged-in user.
+Check assignment is actionable.
+Check workflow transition is valid.
+```
+
+If assignment is missing, return:
+
+```http
+403 Forbidden
+```
+
+Message:
+
+```text
+You are not assigned to this journal.
+```
+
+### 33.7 Page Authorization Matrix
+
+| Page | Required Active Role |
+|---|---|
+| Login | Public |
+| Role Dashboard / Work Queue | PREPARER_RECONCILER or APPROVER |
+| Journal Detail | Assigned PREPARER_RECONCILER or assigned APPROVER |
+| Admin Upload Journal | LOCAL_ADMIN |
+| Admin Dependency Mapping | LOCAL_ADMIN |
+| Admin Currency Conversion | LOCAL_ADMIN |
+| No Access | Authenticated user |
+
+### 33.8 API Authorization Matrix
+
+| API | Required Authorization |
+|---|---|
+| `POST /api/v1/auth/login` | Public |
+| `GET /api/v1/auth/me` | Valid JWT and active session |
+| `POST /api/v1/auth/switch-role` | Valid JWT, active session, requested role assigned to user |
+| `POST /api/v1/auth/refresh-token` | Valid refresh token and active session |
+| `POST /api/v1/journal-files/upload` | LOCAL_ADMIN |
+| `POST /api/v1/journal-files/{fileLoadId}/parse` | LOCAL_ADMIN |
+| `GET /api/v1/admin/dependency-mappings` | LOCAL_ADMIN |
+| `GET /api/v1/admin/currency-rates` | LOCAL_ADMIN |
+| `GET /api/v1/journals/work-queue?period=MM/YYYY` | Active role PREPARER_RECONCILER or APPROVER |
+| `GET /api/v1/journals/{journalId}` | Assigned user for active role or LOCAL_ADMIN read-only if enabled |
+| `POST /api/v1/journals/{journalId}/certify` | Assigned user and valid active role |
+| `POST /api/v1/journals/{journalId}/reject` | Assigned APPROVER only |
+| `POST /api/v1/journals/{journalId}/decertify` | Assigned PREPARER_RECONCILER only |
+| `POST /api/v1/journals/{journalId}/documents` | Assigned active user for journal |
+| `GET /api/v1/journals/{journalId}/documents/{documentId}/download` | Assigned active user for journal |
+| `GET /api/v1/journals/{journalId}/audit` | Assigned active user for journal |
+
+### 33.9 Frontend Token Storage Rule
+
+Recommended Phase 1 approach:
+
+```text
+Store access token in memory when possible.
+Use secure, httpOnly cookie for refresh token if backend/frontend deployment supports it.
+Avoid storing long-lived tokens in localStorage.
+```
+
+If localStorage is used for demo simplicity, document it as a Phase 1 limitation and replace it before production.
+
+### 33.10 No Direct Page Access Without Authorization
+
+The user must not be able to navigate directly to restricted pages by typing URLs.
+
+Examples that must be blocked:
+
+```text
+Preparer manually opens /admin/upload-journal -> Access denied
+Approver manually opens /admin/dependency-mapping -> Access denied
+Unassigned user opens /journals/JRN001 -> Forbidden
+User switches only React state to APPROVER without backend token -> Forbidden
+Expired token opens any protected route -> Redirect to login
+```
+
+### 33.11 Backend Security Dependencies
+
+Create reusable dependencies:
+
+```text
+get_current_user.py
+require_auth.py
+require_role.py
+require_any_role.py
+require_journal_assignment.py
+```
+
+Suggested folder structure:
+
+```text
+backend/app/api/v1/dependencies/
+├── auth_dependencies.py
+├── role_dependencies.py
+└── journal_access_dependencies.py
+```
+
+### 33.12 Security-Related Tables
+
+The existing `user_session` table supports Phase 1 JWT session validation. Add refresh token tracking if refresh tokens are stored server-side.
+
+```sql
+CREATE TABLE user_refresh_token (
+    id BIGSERIAL PRIMARY KEY,
+    token_id VARCHAR(150) UNIQUE NOT NULL,
+    session_id VARCHAR(150) NOT NULL REFERENCES user_session(session_id),
+    user_id VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    token_hash VARCHAR(500) NOT NULL,
+    issued_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL,
+    revoked_at TIMESTAMP NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
+);
+```
+
+Never store raw refresh tokens in the database. Store a hash.
+
+### 33.13 Logout Behavior
+
+Logout endpoint:
+
+```http
+POST /api/v1/auth/logout
+```
+
+Logout should:
+
+```text
+Mark user_session.is_active = false.
+Mark active refresh tokens as revoked.
+Clear frontend auth state.
+Redirect user to login.
+```
+
+### 33.14 Audit Security Events
+
+The following security events should be logged either in `journal_audit_log` where journal-specific or a future `security_audit_log` where application-level:
+
+```text
+Login success
+Login failure
+Logout
+Role switch
+Unauthorized API access attempt
+Forbidden journal access attempt
+Token refresh
+Session expiration
+```
+
+For Phase 1, journal-specific authorization failures can be captured in application logs. A dedicated `security_audit_log` table can be added later if needed.
+
+### 33.15 Security Acceptance Criteria
+
+Authentication and authorization are acceptable only if:
+
+```text
+All protected APIs require Bearer token.
+All protected pages require valid frontend auth context.
+Role switch generates a backend-validated token.
+Admin pages are blocked for non-admin roles.
+Journal detail is blocked for unassigned users.
+Certify/Reject/Decertify validates active role and journal assignment.
+Expired sessions are rejected.
+Logout invalidates session and refresh token.
+Frontend route protection and backend API protection both exist.
+```
+
+
+---
+
+## 34. Centralized Error Handling, Success Messages, and Application Notifications
+
+The application must not display raw technical exceptions directly on the UI. All API failures, validation failures, business rule failures, and unexpected system failures must be converted into structured API responses with stable error codes and user-friendly messages. The UI should render those messages through a reusable popup/toast/dialog notification module.
+
+### 34.1 Error Handling Principle
+
+```text
+Do not throw raw backend errors on the UI.
+Do not show stack traces to users.
+Do not hardcode user-facing messages in many frontend components.
+Do not duplicate the same message in multiple backend services.
+Use centralized error codes, message keys, and notification components.
+```
+
+The backend should send:
+
+```text
+error_code
+message
+severity
+details if needed
+trace_id or correlation_id
+```
+
+The frontend should render:
+
+```text
+Success popup/toast
+Error popup/toast
+Warning popup/toast
+Information popup/toast
+Field-level validation messages where applicable
+```
+
+---
+
+### 34.2 Message Types
+
+Use a common enum for message severity.
+
+```python
+from enum import Enum
+
+
+class MessageSeverity(str, Enum):
+    SUCCESS = "SUCCESS"
+    ERROR = "ERROR"
+    WARNING = "WARNING"
+    INFO = "INFO"
+```
+
+Recommended UI rendering:
+
+```text
+SUCCESS -> green success popup/toast
+ERROR   -> red error popup/dialog
+WARNING -> amber warning popup/toast
+INFO    -> blue/neutral information popup/toast
+```
+
+---
+
+### 34.3 Backend Error Code Enum
+
+Create a centralized backend enum for application error codes.
+
+File:
+
+```text
+backend/app/domain/enums/error_code.py
+```
+
+Example:
+
+```python
+from enum import Enum
+
+
+class ErrorCode(str, Enum):
+    AUTH_INVALID_CREDENTIALS = "AUTH_INVALID_CREDENTIALS"
+    AUTH_TOKEN_EXPIRED = "AUTH_TOKEN_EXPIRED"
+    AUTH_FORBIDDEN = "AUTH_FORBIDDEN"
+    ROLE_NOT_ASSIGNED = "ROLE_NOT_ASSIGNED"
+
+    JOURNAL_NOT_FOUND = "JOURNAL_NOT_FOUND"
+    JOURNAL_NOT_ASSIGNED_TO_USER = "JOURNAL_NOT_ASSIGNED_TO_USER"
+    JOURNAL_INVALID_STATUS_TRANSITION = "JOURNAL_INVALID_STATUS_TRANSITION"
+    JOURNAL_PREPARER_APPROVER_SAME_USER = "JOURNAL_PREPARER_APPROVER_SAME_USER"
+
+    FILE_UPLOAD_FAILED = "FILE_UPLOAD_FAILED"
+    FILE_PARSE_FAILED = "FILE_PARSE_FAILED"
+    FILE_INVALID_COLUMN_COUNT = "FILE_INVALID_COLUMN_COUNT"
+    FILE_INVALID_FORMAT = "FILE_INVALID_FORMAT"
+
+    DEPENDENCY_MAPPING_NOT_FOUND = "DEPENDENCY_MAPPING_NOT_FOUND"
+    PREPARER_ADID_NOT_FOUND = "PREPARER_ADID_NOT_FOUND"
+    APPROVER_ADID_NOT_FOUND = "APPROVER_ADID_NOT_FOUND"
+
+    CURRENCY_RATE_NOT_FOUND = "CURRENCY_RATE_NOT_FOUND"
+
+    AUDIT_LOGGING_FAILED = "AUDIT_LOGGING_FAILED"
+    DATABASE_TRANSACTION_FAILED = "DATABASE_TRANSACTION_FAILED"
+    VALIDATION_ERROR = "VALIDATION_ERROR"
+    INTERNAL_SERVER_ERROR = "INTERNAL_SERVER_ERROR"
+```
+
+Do not create random string error codes inside service methods. Always use the `ErrorCode` enum.
+
+---
+
+### 34.4 Backend Message Catalog
+
+Create a centralized backend message catalog so messages are not duplicated across services.
+
+File:
+
+```text
+backend/app/core/message_catalog.py
+```
+
+Example:
+
+```python
+ERROR_MESSAGES = {
+    ErrorCode.AUTH_INVALID_CREDENTIALS: "Invalid username or password.",
+    ErrorCode.AUTH_TOKEN_EXPIRED: "Your session has expired. Please log in again.",
+    ErrorCode.AUTH_FORBIDDEN: "You are not authorized to perform this action.",
+    ErrorCode.ROLE_NOT_ASSIGNED: "The selected role is not assigned to your user profile.",
+
+    ErrorCode.JOURNAL_NOT_FOUND: "Journal was not found.",
+    ErrorCode.JOURNAL_NOT_ASSIGNED_TO_USER: "You are not assigned to this journal.",
+    ErrorCode.JOURNAL_INVALID_STATUS_TRANSITION: "This journal action is not allowed in the current status.",
+    ErrorCode.JOURNAL_PREPARER_APPROVER_SAME_USER: "Preparer/Reconciler and Approver cannot be the same user for the same journal.",
+
+    ErrorCode.FILE_UPLOAD_FAILED: "File upload failed. Please try again.",
+    ErrorCode.FILE_PARSE_FAILED: "Parse failed. No journal data was created.",
+    ErrorCode.FILE_INVALID_COLUMN_COUNT: "The file has invalid column count. Expected 27 tab-delimited columns.",
+    ErrorCode.FILE_INVALID_FORMAT: "The uploaded file format is invalid.",
+
+    ErrorCode.DEPENDENCY_MAPPING_NOT_FOUND: "Approver mapping was not found for the Preparer ADID.",
+    ErrorCode.PREPARER_ADID_NOT_FOUND: "Preparer ADID from the file was not found in the user master.",
+    ErrorCode.APPROVER_ADID_NOT_FOUND: "Approver ADID from dependency mapping was not found in the user master.",
+
+    ErrorCode.CURRENCY_RATE_NOT_FOUND: "Currency conversion rate was not found for the selected currency and period.",
+
+    ErrorCode.AUDIT_LOGGING_FAILED: "Action could not be completed because audit logging failed. Please retry or contact support.",
+    ErrorCode.DATABASE_TRANSACTION_FAILED: "The transaction failed. No changes were saved.",
+    ErrorCode.VALIDATION_ERROR: "Please correct the highlighted fields and try again.",
+    ErrorCode.INTERNAL_SERVER_ERROR: "Something went wrong. Please try again or contact support.",
+}
+```
+
+---
+
+### 34.5 Standard API Error Response Contract
+
+Every failed API response should follow the same shape.
+
+```json
+{
+  "success": false,
+  "error": {
+    "error_code": "FILE_PARSE_FAILED",
+    "message": "Parse failed. No journal data was created.",
+    "severity": "ERROR",
+    "details": [
+      {
+        "field": "Preparer",
+        "row_number": 12,
+        "error_code": "PREPARER_ADID_NOT_FOUND",
+        "message": "Preparer ADID from the file was not found in the user master."
+      }
+    ],
+    "correlation_id": "CORR-20260819-0001"
+  }
+}
+```
+
+The frontend must use `error.error_code` and `error.message` to render a proper popup/dialog.
+
+---
+
+### 34.6 Standard API Success Response Contract
+
+Every successful action should also return a structured response.
+
+```json
+{
+  "success": true,
+  "message": {
+    "message_code": "JOURNAL_CERTIFIED_SUCCESSFULLY",
+    "message": "Certified successfully.",
+    "severity": "SUCCESS"
+  },
+  "data": {
+    "journal_id": "JRN001",
+    "status": "PENDING_APPROVER"
+  },
+  "correlation_id": "CORR-20260819-0002"
+}
+```
+
+---
+
+### 34.7 Success Message Enum
+
+Create centralized success message codes.
+
+File:
+
+```text
+backend/app/domain/enums/success_code.py
+```
+
+Example:
+
+```python
+from enum import Enum
+
+
+class SuccessCode(str, Enum):
+    FILE_UPLOADED_SUCCESSFULLY = "FILE_UPLOADED_SUCCESSFULLY"
+    FILE_PARSE_STARTED = "FILE_PARSE_STARTED"
+    FILE_PARSED_SUCCESSFULLY = "FILE_PARSED_SUCCESSFULLY"
+    JOURNAL_CERTIFIED_SUCCESSFULLY = "JOURNAL_CERTIFIED_SUCCESSFULLY"
+    JOURNAL_APPROVED_SUCCESSFULLY = "JOURNAL_APPROVED_SUCCESSFULLY"
+    JOURNAL_REJECTED_SUCCESSFULLY = "JOURNAL_REJECTED_SUCCESSFULLY"
+    JOURNAL_DECERTIFIED_SUCCESSFULLY = "JOURNAL_DECERTIFIED_SUCCESSFULLY"
+    DOCUMENT_UPLOADED_SUCCESSFULLY = "DOCUMENT_UPLOADED_SUCCESSFULLY"
+    COMMENT_ADDED_SUCCESSFULLY = "COMMENT_ADDED_SUCCESSFULLY"
+    HYPERLINK_ADDED_SUCCESSFULLY = "HYPERLINK_ADDED_SUCCESSFULLY"
+```
+
+---
+
+### 34.8 Application Info Message Enum
+
+Create centralized informational message codes.
+
+File:
+
+```text
+backend/app/domain/enums/info_code.py
+```
+
+Example:
+
+```python
+from enum import Enum
+
+
+class InfoCode(str, Enum):
+    NO_RECORDS_FOUND = "NO_RECORDS_FOUND"
+    PARSING_IN_PROGRESS = "PARSING_IN_PROGRESS"
+    SESSION_EXPIRING_SOON = "SESSION_EXPIRING_SOON"
+    PREVIEW_NOT_AVAILABLE = "PREVIEW_NOT_AVAILABLE"
+    FILTER_MINIMUM_CHARACTERS_REQUIRED = "FILTER_MINIMUM_CHARACTERS_REQUIRED"
+```
+
+---
+
+### 34.9 Frontend Notification Module
+
+Create a reusable frontend notification module.
+
+Recommended structure:
+
+```text
+frontend/modules/shared/notifications/
+├── components/AppNotificationProvider.tsx
+├── components/NotificationPopup.tsx
+├── components/NotificationDialog.tsx
+├── hooks/useNotification.ts
+├── services/notificationMapper.ts
+├── types/notification.types.ts
+└── styles/NotificationPopup.module.css
+```
+
+Notification types:
+
+```typescript
+export type NotificationSeverity = 'SUCCESS' | 'ERROR' | 'WARNING' | 'INFO';
+
+export interface AppNotification {
+  code: string;
+  message: string;
+  severity: NotificationSeverity;
+  details?: NotificationDetail[];
+  correlationId?: string;
+}
+```
+
+Use this module everywhere instead of creating custom popups in each page.
+
+---
+
+### 34.10 Frontend API Error Handling
+
+The API client should centrally intercept failed API responses and convert them into notifications.
+
+Recommended file:
+
+```text
+frontend/modules/shared/api/apiClient.ts
+```
+
+Behavior:
+
+```text
+If API returns success=false:
+    Map error_code to notification.
+    Show popup/dialog.
+    Return structured error to caller.
+
+If HTTP 401:
+    Show session expired message.
+    Redirect to login.
+
+If HTTP 403:
+    Show access denied message.
+    Redirect to no-access or remain on page.
+
+If network error:
+    Show network error popup.
+
+If unknown error:
+    Show generic error popup with correlation ID.
+```
+
+---
+
+### 34.11 Error Handling By Scenario
+
+#### Parse Failure
+
+Backend response:
+
+```json
+{
+  "success": false,
+  "error": {
+    "error_code": "FILE_PARSE_FAILED",
+    "message": "Parse failed. No journal data was created.",
+    "severity": "ERROR",
+    "details": [
+      {
+        "row_number": 5,
+        "field": "Preparer",
+        "error_code": "PREPARER_ADID_NOT_FOUND",
+        "message": "Preparer ADID from the file was not found in the user master."
+      }
+    ],
+    "correlation_id": "CORR-001"
+  }
+}
+```
+
+UI behavior:
+
+```text
+Show error popup.
+Show summary: Parse failed. No journal data was created.
+Show row-level error panel.
+Keep file in PARSE_FAILED status.
+Do not show raw stack trace.
+```
+
+#### Unauthorized Page/API Access
+
+Backend response:
+
+```json
+{
+  "success": false,
+  "error": {
+    "error_code": "AUTH_FORBIDDEN",
+    "message": "You are not authorized to perform this action.",
+    "severity": "ERROR",
+    "correlation_id": "CORR-002"
+  }
+}
+```
+
+UI behavior:
+
+```text
+Show access denied popup.
+Navigate to no-access page if needed.
+```
+
+#### Successful Certification
+
+Backend response:
+
+```json
+{
+  "success": true,
+  "message": {
+    "message_code": "JOURNAL_CERTIFIED_SUCCESSFULLY",
+    "message": "Certified successfully.",
+    "severity": "SUCCESS"
+  },
+  "data": {
+    "journal_id": "JRN001",
+    "status": "PENDING_APPROVER"
+  },
+  "correlation_id": "CORR-003"
+}
+```
+
+UI behavior:
+
+```text
+Show success popup.
+Refresh grid/detail state.
+Show journal in View + Decertify mode for Preparer/Reconciler.
+```
+
+---
+
+### 34.12 Backend Exception Hierarchy
+
+Use application-specific exceptions instead of generic exceptions in application services.
+
+Recommended structure:
+
+```text
+backend/app/domain/exceptions/
+├── application_exception.py
+├── validation_exception.py
+├── authorization_exception.py
+├── business_rule_exception.py
+├── parse_exception.py
+├── not_found_exception.py
+└── transaction_exception.py
+```
+
+Base exception:
+
+```python
+class ApplicationException(Exception):
+    def __init__(self, error_code: ErrorCode, message: str | None = None, details: list | None = None):
+        self.error_code = error_code
+        self.message = message
+        self.details = details or []
+```
+
+Global FastAPI exception handlers should convert these exceptions into the standard error response contract.
+
+---
+
+### 34.13 Global FastAPI Exception Handler
+
+Create centralized exception handling.
+
+Recommended file:
+
+```text
+backend/app/api/exception_handlers.py
+```
+
+Responsibilities:
+
+```text
+Convert ApplicationException to standard API error response.
+Convert Pydantic validation errors to VALIDATION_ERROR response.
+Convert SQLAlchemy/database errors to DATABASE_TRANSACTION_FAILED response.
+Convert unknown exceptions to INTERNAL_SERVER_ERROR response.
+Attach correlation_id to every error response.
+Log technical details on the server only.
+Never expose stack trace to UI.
+```
+
+---
+
+### 34.14 Correlation ID
+
+Every API response should include a correlation ID.
+
+Purpose:
+
+```text
+User sees correlation ID in popup.
+Support team can search logs using correlation ID.
+Backend logs can connect request, exception, transaction, and audit records.
+```
+
+Example UI error popup:
+
+```text
+Parse failed. No journal data was created.
+Correlation ID: CORR-20260819-0001
+```
+
+---
+
+### 34.15 UI Popup Rules
+
+Use popup/dialog severity based on message type.
+
+```text
+SUCCESS: auto-dismiss toast after few seconds.
+INFO: auto-dismiss toast or inline information banner.
+WARNING: visible banner or popup, user can close.
+ERROR: modal/dialog or sticky toast until user closes.
+```
+
+For critical errors such as parse failure, authorization failure, or transaction rollback, use a popup/dialog with details.
+
+---
+
+### 34.16 Maintainability Rule
+
+Do not hardcode repeated messages inside components or service classes.
+
+Incorrect:
+
+```typescript
+alert('Parse failed. No journal data was created.');
+```
+
+Correct:
+
+```typescript
+notificationService.show(apiError);
+```
+
+Incorrect:
+
+```python
+raise Exception('Preparer and approver cannot be same user')
+```
+
+Correct:
+
+```python
+raise BusinessRuleException(ErrorCode.JOURNAL_PREPARER_APPROVER_SAME_USER)
+```
+
+---
+
+### 34.17 Acceptance Criteria
+
+Error and notification handling is acceptable only if:
+
+```text
+All API errors return standard error response structure.
+All API successes return standard success response structure.
+Error codes are enums.
+Success codes are enums.
+Info codes are enums.
+Frontend has one shared notification module.
+Raw backend exceptions are never shown on UI.
+Correlation ID appears in error popup for support.
+All workflow action failures rollback cleanly.
+Parse failure shows user-friendly popup and row-level error details.
+Messages are not duplicated across multiple pages.
+```
+
+---
+
+## 35. Final Project Folder Structure
+
+Current Phase Note:
+
+```text
+Docker is not used in the current development setup.
+Container-specific files are excluded from the active Phase 1 folder structure.
+The application should be run locally using Python/FastAPI, PostgreSQL, and Next.js commands.
+Containerization can be added later if deployment requires it.
+```
+
+
+This section defines the final maintainable folder structure for the full Phase 1 architecture. The structure is organized by Clean Architecture on the backend and by business modules on the frontend.
+
+The key principles are:
+
+```text
+Backend:
+- Domain owns entities, enums, interfaces, and business exceptions.
+- Application owns application services and DTOs.
+- Infrastructure owns database models, repositories, external implementation, and technical services.
+- API owns controllers, schemas, dependencies, and exception handlers.
+
+Frontend:
+- Business modules own their pages, components, hooks, services, types, and CSS modules.
+- Shared UI utilities are moved to shared only when reused by multiple modules.
+- CSS is modular and page/component scoped.
+- No external product names are used anywhere in code, comments, CSS, routes, folders, logs, or documentation.
+```
+
+---
+
+### 35.1 Root Repository Structure
+
+```text
+journal-certification-portal/
+│
+├── backend/
+│   ├── app/
+│   ├── alembic/
+│   ├── tests/
+│   ├── seed/
+│   ├── scripts/
+│   ├── .env.example
+│   ├── requirements.txt
+│   ├── pyproject.toml
+│   │   └── README.md
+│
+├── frontend/
+│   ├── app/
+│   ├── modules/
+│   ├── styles/
+│   ├── public/
+│   ├── tests/
+│   ├── .env.example
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── next.config.js
+│   └── README.md
+│
+├── docs/
+│   ├── 01_Architecture_Overview.md
+│   ├── 02_Database_Schema.md
+│   ├── 03_Backend_Architecture.md
+│   ├── 04_Frontend_UI_Architecture.md
+│   ├── 05_Workflows_and_Screens.md
+│   ├── 06_Admin_Module.md
+│   ├── 07_APIs_and_Contracts.md
+│   ├── 08_Audit_and_Security.md
+│   ├── 09_UI_Standards_and_CSS.md
+│   ├── 10_Implementation_Roadmap.md
+│   └── journal_certification_pilot_phase1_architecture.md
+│
+├── .gitignore
+└── README.md
+```
+
+---
+
+## 35.2 Backend Folder Structure
+
+```text
+backend/
+│
+├── app/
+│   ├── __init__.py
+│   ├── main.py
+│   ├── config.py
+│   ├── container.py
+│   ├── logging_config.py
+│   │
+│   ├── api/
+│   │   ├── __init__.py
+│   │   ├── exception_handlers.py
+│   │   └── v1/
+│   │       ├── __init__.py
+│   │       ├── routes.py
+│   │       │
+│   │       ├── controllers/
+│   │       │   ├── __init__.py
+│   │       │   ├── auth_controller.py
+│   │       │   ├── journal_file_controller.py
+│   │       │   ├── work_queue_controller.py
+│   │       │   ├── journal_detail_controller.py
+│   │       │   ├── certification_controller.py
+│   │       │   ├── journal_document_controller.py
+│   │       │   ├── journal_comment_controller.py
+│   │       │   ├── journal_hyperlink_controller.py
+│   │       │   ├── admin_currency_controller.py
+│   │       │   ├── admin_dependency_mapping_controller.py
+│   │       │   └── health_controller.py
+│   │       │
+│   │       └── dependencies/
+│   │           ├── __init__.py
+│   │           ├── auth_dependencies.py
+│   │           ├── role_dependencies.py
+│   │           ├── journal_access_dependencies.py
+│   │           └── request_context_dependencies.py
+│   │
+│   ├── core/
+│   │   ├── __init__.py
+│   │   ├── message_catalog.py
+│   │   ├── correlation_id.py
+│   │   ├── security.py
+│   │   ├── password_hashing.py
+│   │   └── token_service.py
+│   │
+│   ├── domain/
+│   │   ├── __init__.py
+│   │   │
+│   │   ├── entities/
+│   │   │   ├── __init__.py
+│   │   │   ├── user.py
+│   │   │   ├── role.py
+│   │   │   ├── user_session.py
+│   │   │   ├── user_refresh_token.py
+│   │   │   ├── team.py
+│   │   │   ├── approval_matrix.py
+│   │   │   ├── role_external_mapping.py
+│   │   │   ├── jde_user_dependency_mapping.py
+│   │   │   ├── dependency_mapping_load.py
+│   │   │   ├── journal_file_load.py
+│   │   │   ├── journal_file_parse_error.py
+│   │   │   ├── journal_header.py
+│   │   │   ├── journal_assignment.py
+│   │   │   ├── journal_line.py
+│   │   │   ├── journal_comment.py
+│   │   │   ├── journal_document.py
+│   │   │   ├── journal_hyperlink.py
+│   │   │   ├── journal_certification.py
+│   │   │   ├── journal_audit_log.py
+│   │   │   ├── rejection_reason.py
+│   │   │   ├── currency_conversion_rate.py
+│   │   │   ├── currency_rate_load.py
+│   │   │   ├── certification_statement_config.py
+│   │   │   └── app_config.py
+│   │   │
+│   │   ├── enums/
+│   │   │   ├── __init__.py
+│   │   │   ├── role_code.py
+│   │   │   ├── journal_status.py
+│   │   │   ├── assignment_status.py
+│   │   │   ├── file_load_status.py
+│   │   │   ├── certification_status.py
+│   │   │   ├── workflow_action.py
+│   │   │   ├── message_severity.py
+│   │   │   ├── error_code.py
+│   │   │   ├── success_code.py
+│   │   │   └── info_code.py
+│   │   │
+│   │   ├── exceptions/
+│   │   │   ├── __init__.py
+│   │   │   ├── application_exception.py
+│   │   │   ├── validation_exception.py
+│   │   │   ├── authorization_exception.py
+│   │   │   ├── business_rule_exception.py
+│   │   │   ├── parse_exception.py
+│   │   │   ├── not_found_exception.py
+│   │   │   └── transaction_exception.py
+│   │   │
+│   │   ├── repositories/
+│   │   │   ├── __init__.py
+│   │   │   ├── user_repository.py
+│   │   │   ├── role_repository.py
+│   │   │   ├── user_session_repository.py
+│   │   │   ├── user_refresh_token_repository.py
+│   │   │   ├── team_repository.py
+│   │   │   ├── approval_matrix_repository.py
+│   │   │   ├── role_external_mapping_repository.py
+│   │   │   ├── dependency_mapping_repository.py
+│   │   │   ├── journal_file_load_repository.py
+│   │   │   ├── journal_file_parse_error_repository.py
+│   │   │   ├── journal_header_repository.py
+│   │   │   ├── journal_assignment_repository.py
+│   │   │   ├── journal_line_repository.py
+│   │   │   ├── journal_comment_repository.py
+│   │   │   ├── journal_document_repository.py
+│   │   │   ├── journal_hyperlink_repository.py
+│   │   │   ├── journal_certification_repository.py
+│   │   │   ├── journal_audit_repository.py
+│   │   │   ├── rejection_reason_repository.py
+│   │   │   ├── currency_conversion_repository.py
+│   │   │   ├── certification_statement_repository.py
+│   │   │   └── app_config_repository.py
+│   │   │
+│   │   └── services/
+│   │       ├── __init__.py
+│   │       ├── auth_service.py
+│   │       ├── active_role_service.py
+│   │       ├── journal_parser_service.py
+│   │       ├── journal_validation_service.py
+│   │       ├── journal_assignment_service.py
+│   │       ├── journal_totals_service.py
+│   │       ├── currency_conversion_service.py
+│   │       ├── certification_workflow_service.py
+│   │       ├── audit_service.py
+│   │       ├── message_service.py
+│   │       └── file_blob_service.py
+│   │
+│   ├── application/
+│   │   ├── __init__.py
+│   │   │
+│   │   ├── dto/
+│   │   │   ├── __init__.py
+│   │   │   ├── auth_dto.py
+│   │   │   ├── active_role_dto.py
+│   │   │   ├── api_response_dto.py
+│   │   │   ├── error_response_dto.py
+│   │   │   ├── journal_upload_dto.py
+│   │   │   ├── parse_result_dto.py
+│   │   │   ├── work_queue_dto.py
+│   │   │   ├── journal_detail_dto.py
+│   │   │   ├── journal_line_dto.py
+│   │   │   ├── certification_dto.py
+│   │   │   ├── document_dto.py
+│   │   │   ├── comment_dto.py
+│   │   │   ├── hyperlink_dto.py
+│   │   │   ├── audit_dto.py
+│   │   │   ├── currency_rate_dto.py
+│   │   │   └── dependency_mapping_dto.py
+│   │   │
+│   │   ├── mappers/
+│   │   │   ├── __init__.py
+│   │   │   ├── user_mapper.py
+│   │   │   ├── journal_mapper.py
+│   │   │   ├── work_queue_mapper.py
+│   │   │   ├── document_mapper.py
+│   │   │   ├── audit_mapper.py
+│   │   │   └── dependency_mapping_mapper.py
+│   │   │
+│   │   └── services/
+│   │       ├── __init__.py
+│   │       ├── demo_login_service.py
+│   │       ├── refresh_token_service.py
+│   │       ├── logout_service.py
+│   │       ├── get_logged_in_user_service.py
+│   │       ├── switch_active_role_service.py
+│   │       ├── upload_journal_file_service.py
+│   │       ├── parse_journal_file_service.py
+│   │       ├── get_file_parse_result_service.py
+│   │       ├── get_file_parse_errors_service.py
+│   │       ├── get_work_queue_by_period_service.py
+│   │       ├── get_journal_detail_service.py
+│   │       ├── certify_journal_service.py
+│   │       ├── reject_journal_service.py
+│   │       ├── decertify_journal_service.py
+│   │       ├── upload_journal_document_service.py
+│   │       ├── download_journal_document_service.py
+│   │       ├── preview_journal_document_service.py
+│   │       ├── add_journal_comment_service.py
+│   │       ├── add_journal_hyperlink_service.py
+│   │       ├── get_journal_audit_service.py
+│   │       ├── get_currency_rates_service.py
+│   │       └── get_dependency_mappings_service.py
+│   │
+│   ├── infrastructure/
+│   │   ├── __init__.py
+│   │   │
+│   │   ├── database/
+│   │   │   ├── __init__.py
+│   │   │   ├── db.py
+│   │   │   ├── base.py
+│   │   │   │
+│   │   │   ├── models/
+│   │   │   │   ├── __init__.py
+│   │   │   │   ├── user_model.py
+│   │   │   │   ├── role_model.py
+│   │   │   │   ├── user_role_model.py
+│   │   │   │   ├── user_session_model.py
+│   │   │   │   ├── user_refresh_token_model.py
+│   │   │   │   ├── team_model.py
+│   │   │   │   ├── approval_matrix_model.py
+│   │   │   │   ├── role_external_mapping_model.py
+│   │   │   │   ├── jde_user_dependency_mapping_model.py
+│   │   │   │   ├── dependency_mapping_load_model.py
+│   │   │   │   ├── journal_file_load_model.py
+│   │   │   │   ├── journal_file_parse_error_model.py
+│   │   │   │   ├── journal_header_model.py
+│   │   │   │   ├── journal_assignment_model.py
+│   │   │   │   ├── journal_line_model.py
+│   │   │   │   ├── journal_comment_model.py
+│   │   │   │   ├── journal_document_model.py
+│   │   │   │   ├── journal_hyperlink_model.py
+│   │   │   │   ├── journal_certification_model.py
+│   │   │   │   ├── journal_audit_log_model.py
+│   │   │   │   ├── rejection_reason_model.py
+│   │   │   │   ├── currency_conversion_rate_model.py
+│   │   │   │   ├── currency_rate_load_model.py
+│   │   │   │   ├── certification_statement_config_model.py
+│   │   │   │   └── app_config_model.py
+│   │   │   │
+│   │   │   └── repositories/
+│   │   │       ├── __init__.py
+│   │   │       ├── user_repository_impl.py
+│   │   │       ├── role_repository_impl.py
+│   │   │       ├── user_session_repository_impl.py
+│   │   │       ├── user_refresh_token_repository_impl.py
+│   │   │       ├── team_repository_impl.py
+│   │   │       ├── approval_matrix_repository_impl.py
+│   │   │       ├── role_external_mapping_repository_impl.py
+│   │   │       ├── dependency_mapping_repository_impl.py
+│   │   │       ├── journal_file_load_repository_impl.py
+│   │   │       ├── journal_file_parse_error_repository_impl.py
+│   │   │       ├── journal_header_repository_impl.py
+│   │   │       ├── journal_assignment_repository_impl.py
+│   │   │       ├── journal_line_repository_impl.py
+│   │   │       ├── journal_comment_repository_impl.py
+│   │   │       ├── journal_document_repository_impl.py
+│   │   │       ├── journal_hyperlink_repository_impl.py
+│   │   │       ├── journal_certification_repository_impl.py
+│   │   │       ├── journal_audit_repository_impl.py
+│   │   │       ├── rejection_reason_repository_impl.py
+│   │   │       ├── currency_conversion_repository_impl.py
+│   │   │       ├── certification_statement_repository_impl.py
+│   │   │       └── app_config_repository_impl.py
+│   │   │
+│   │   └── services/
+│   │       ├── __init__.py
+│   │       ├── demo_auth_service_impl.py
+│   │       ├── active_role_service_impl.py
+│   │       ├── jwt_token_service_impl.py
+│   │       ├── postgres_blob_service_impl.py
+│   │       ├── tab_delimited_journal_parser_service_impl.py
+│   │       ├── journal_validation_service_impl.py
+│   │       ├── journal_assignment_service_impl.py
+│   │       ├── journal_totals_service_impl.py
+│   │       ├── currency_conversion_service_impl.py
+│   │       ├── certification_workflow_service_impl.py
+│   │       ├── audit_service_impl.py
+│   │       └── message_service_impl.py
+│   │
+│   ├── schemas/
+│   │   ├── __init__.py
+│   │   ├── auth_schema.py
+│   │   ├── active_role_schema.py
+│   │   ├── api_response_schema.py
+│   │   ├── journal_file_schema.py
+│   │   ├── parse_result_schema.py
+│   │   ├── work_queue_schema.py
+│   │   ├── journal_detail_schema.py
+│   │   ├── certification_schema.py
+│   │   ├── document_schema.py
+│   │   ├── comment_schema.py
+│   │   ├── hyperlink_schema.py
+│   │   ├── audit_schema.py
+│   │   ├── currency_schema.py
+│   │   └── dependency_mapping_schema.py
+│   │
+│   └── utils/
+│       ├── __init__.py
+│       ├── id_generator.py
+│       ├── date_utils.py
+│       ├── file_hash_utils.py
+│       ├── mime_type_utils.py
+│       ├── pagination_utils.py
+│       └── string_utils.py
+│
+├── alembic/
+│   ├── env.py
+│   └── versions/
+│
+├── seed/
+│   ├── seed_roles.sql
+│   ├── seed_users.sql
+│   ├── seed_user_roles.sql
+│   ├── seed_teams.sql
+│   ├── seed_role_external_mapping.sql
+│   ├── seed_dependency_mapping.sql
+│   ├── seed_rejection_reasons.sql
+│   ├── seed_currency_rates.sql
+│   ├── seed_certification_statements.sql
+│   └── seed_app_config.sql
+│
+├── tests/
+│   ├── unit/
+│   ├── integration/
+│   └── conftest.py
+│
+├── scripts/
+│   ├── run_migrations.sh
+│   ├── seed_database.sh
+│   └── create_demo_data.py
+│
+├── .env.example
+├── requirements.txt
+├── pyproject.toml
+├── run_api.sh
+└── README.md
+```
+
+---
+
+## 35.3 Frontend Folder Structure
+
+```text
+frontend/
+│
+├── app/
+│   ├── layout.tsx
+│   ├── page.tsx
+│   ├── globals.css
+│   │
+│   ├── login/
+│   │   └── page.tsx
+│   │
+│   ├── journals/
+│   │   ├── page.tsx
+│   │   └── [journalId]/
+│   │       └── page.tsx
+│   │
+│   ├── admin/
+│   │   ├── upload-journal/
+│   │   │   └── page.tsx
+│   │   ├── currency-rates/
+│   │   │   └── page.tsx
+│   │   └── dependency-mapping/
+│   │       └── page.tsx
+│   │
+│   └── no-access/
+│       └── page.tsx
+│
+├── styles/
+│   ├── journal-certification-theme.css
+│   ├── typography.css
+│   ├── grid.css
+│   ├── forms.css
+│   ├── buttons.css
+│   └── layout.css
+│
+├── modules/
+│   ├── auth/
+│   │   ├── pages/
+│   │   │   └── LoginPage.tsx
+│   │   ├── components/
+│   │   │   └── LoginForm.tsx
+│   │   ├── hooks/
+│   │   │   └── useAuth.ts
+│   │   ├── services/
+│   │   │   └── authService.ts
+│   │   ├── types/
+│   │   │   └── auth.types.ts
+│   │   └── styles/
+│   │       ├── LoginPage.module.css
+│   │       └── LoginForm.module.css
+│   │
+│   ├── layout/
+│   │   ├── components/
+│   │   │   ├── AppShell.tsx
+│   │   │   ├── Header.tsx
+│   │   │   ├── Sidebar.tsx
+│   │   │   └── UserRoleDropdown.tsx
+│   │   ├── hooks/
+│   │   │   └── useActiveRole.ts
+│   │   ├── services/
+│   │   │   └── roleService.ts
+│   │   ├── types/
+│   │   │   └── role.types.ts
+│   │   └── styles/
+│   │       ├── AppShell.module.css
+│   │       ├── Header.module.css
+│   │       ├── Sidebar.module.css
+│   │       └── UserRoleDropdown.module.css
+│   │
+│   ├── journals/
+│   │   ├── pages/
+│   │   │   ├── WorkQueuePage.tsx
+│   │   │   └── JournalDetailPage.tsx
+│   │   │
+│   │   ├── components/
+│   │   │   ├── PeriodSelector.tsx
+│   │   │   ├── RoleDashboardGrid.tsx
+│   │   │   ├── JournalGrid.tsx
+│   │   │   ├── GridFilterRow.tsx
+│   │   │   ├── JournalActionLink.tsx
+│   │   │   ├── JournalActionResolver.ts
+│   │   │   ├── JournalHeaderPanel.tsx
+│   │   │   ├── JournalLineGrid.tsx
+│   │   │   ├── JournalCommentsPanel.tsx
+│   │   │   ├── JournalDocumentsPanel.tsx
+│   │   │   ├── JournalHyperlinksPanel.tsx
+│   │   │   ├── CertificationPanel.tsx
+│   │   │   ├── AuditTrailPanel.tsx
+│   │   │   └── DecertifyDialog.tsx
+│   │   │
+│   │   ├── hooks/
+│   │   │   ├── useWorkQueue.ts
+│   │   │   ├── useJournalDetail.ts
+│   │   │   ├── useJournalLocalFilters.ts
+│   │   │   ├── useCertificationActions.ts
+│   │   │   └── useJournalAudit.ts
+│   │   │
+│   │   ├── services/
+│   │   │   ├── workQueueService.ts
+│   │   │   ├── journalService.ts
+│   │   │   ├── certificationService.ts
+│   │   │   └── auditService.ts
+│   │   │
+│   │   ├── types/
+│   │   │   ├── journal.types.ts
+│   │   │   ├── workQueue.types.ts
+│   │   │   ├── certification.types.ts
+│   │   │   └── audit.types.ts
+│   │   │
+│   │   └── styles/
+│   │       ├── WorkQueuePage.module.css
+│   │       ├── JournalDetailPage.module.css
+│   │       ├── RoleDashboardGrid.module.css
+│   │       ├── JournalGrid.module.css
+│   │       ├── GridFilterRow.module.css
+│   │       ├── JournalActionLink.module.css
+│   │       ├── JournalHeaderPanel.module.css
+│   │       ├── JournalLineGrid.module.css
+│   │       ├── JournalCommentsPanel.module.css
+│   │       ├── JournalDocumentsPanel.module.css
+│   │       ├── JournalHyperlinksPanel.module.css
+│   │       ├── CertificationPanel.module.css
+│   │       ├── AuditTrailPanel.module.css
+│   │       └── DecertifyDialog.module.css
+│   │
+│   ├── documents/
+│   │   ├── components/
+│   │   │   ├── FileUploadArea.tsx
+│   │   │   ├── DocumentList.tsx
+│   │   │   ├── FileDownloadIcon.tsx
+│   │   │   └── FilePreviewIcon.tsx
+│   │   ├── hooks/
+│   │   │   └── useJournalDocuments.ts
+│   │   ├── services/
+│   │   │   └── documentService.ts
+│   │   ├── types/
+│   │   │   └── document.types.ts
+│   │   └── styles/
+│   │       ├── FileUploadArea.module.css
+│   │       ├── DocumentList.module.css
+│   │       └── DocumentPanel.module.css
+│   │
+│   ├── admin/
+│   │   ├── pages/
+│   │   │   ├── JournalUploadPage.tsx
+│   │   │   ├── CurrencyRatesPage.tsx
+│   │   │   └── DependencyMappingPage.tsx
+│   │   │
+│   │   ├── components/
+│   │   │   ├── JournalFileUpload.tsx
+│   │   │   ├── FileUploadPanel.tsx
+│   │   │   ├── FileProcessingGrid.tsx
+│   │   │   ├── FileParseButton.tsx
+│   │   │   ├── ParseResultDialog.tsx
+│   │   │   ├── ParseErrorPanel.tsx
+│   │   │   ├── AdminNotificationBanner.tsx
+│   │   │   ├── CurrencyRateGrid.tsx
+│   │   │   ├── DependencyMappingGrid.tsx
+│   │   │   └── DependencyMappingFilterRow.tsx
+│   │   │
+│   │   ├── hooks/
+│   │   │   ├── useJournalFileUpload.ts
+│   │   │   ├── useJournalFileParse.ts
+│   │   │   ├── useCurrencyRates.ts
+│   │   │   └── useDependencyMappings.ts
+│   │   │
+│   │   ├── services/
+│   │   │   ├── journalFileAdminService.ts
+│   │   │   ├── adminCurrencyService.ts
+│   │   │   └── dependencyMappingService.ts
+│   │   │
+│   │   ├── types/
+│   │   │   ├── journalFileAdmin.types.ts
+│   │   │   ├── currency.types.ts
+│   │   │   └── dependencyMapping.types.ts
+│   │   │
+│   │   └── styles/
+│   │       ├── JournalUploadPage.module.css
+│   │       ├── FileUploadPanel.module.css
+│   │       ├── FileProcessingGrid.module.css
+│   │       ├── ParseResultDialog.module.css
+│   │       ├── ParseErrorPanel.module.css
+│   │       ├── AdminNotificationBanner.module.css
+│   │       ├── CurrencyRatesPage.module.css
+│   │       ├── CurrencyRateGrid.module.css
+│   │       ├── DependencyMappingPage.module.css
+│   │       ├── DependencyMappingGrid.module.css
+│   │       └── DependencyMappingFilterRow.module.css
+│   │
+│   └── shared/
+│       ├── api/
+│       │   ├── apiClient.ts
+│       │   ├── apiResponse.types.ts
+│       │   └── apiErrorHandler.ts
+│       │
+│       ├── notifications/
+│       │   ├── components/
+│       │   │   ├── AppNotificationProvider.tsx
+│       │   │   ├── NotificationPopup.tsx
+│       │   │   └── NotificationDialog.tsx
+│       │   ├── hooks/
+│       │   │   └── useNotification.ts
+│       │   ├── services/
+│       │   │   └── notificationMapper.ts
+│       │   ├── types/
+│       │   │   └── notification.types.ts
+│       │   └── styles/
+│       │       ├── NotificationPopup.module.css
+│       │       └── NotificationDialog.module.css
+│       │
+│       ├── components/
+│       │   ├── EmptyState.tsx
+│       │   ├── StatusBadge.tsx
+│       │   ├── ConfirmDialog.tsx
+│       │   ├── DataGridShell.tsx
+│       │   ├── GridPagination.tsx
+│       │   ├── FormField.tsx
+│       │   └── LoadingSpinner.tsx
+│       │
+│       ├── hooks/
+│       │   ├── useClientPagination.ts
+│       │   ├── useDebouncedValue.ts
+│       │   └── useClientTableFilter.ts
+│       │
+│       ├── styles/
+│       │   ├── EmptyState.module.css
+│       │   ├── StatusBadge.module.css
+│       │   ├── ConfirmDialog.module.css
+│       │   ├── DataGridShell.module.css
+│       │   ├── GridPagination.module.css
+│       │   ├── FormField.module.css
+│       │   └── LoadingSpinner.module.css
+│       │
+│       └── utils/
+│           ├── formatDate.ts
+│           ├── formatCurrency.ts
+│           ├── filterRows.ts
+│           ├── sortRows.ts
+│           └── buildCorrelationMessage.ts
+│
+├── public/
+│
+├── tests/
+│   ├── unit/
+│   ├── integration/
+│   └── e2e/
+│
+├── .env.example
+├── package.json
+├── tsconfig.json
+├── next.config.js
+├── run_ui.sh
+└── README.md
+```
+
+---
+
+## 35.4 Folder Structure Rules
+
+### Backend Rules
+
+```text
+Do not import infrastructure code into domain.
+Use repository interfaces in domain and implementations in infrastructure.
+Use service interfaces in domain and implementations in infrastructure.
+Use application services for application orchestration.
+Use controllers only for HTTP request/response handling.
+Use schemas only for API request/response contracts.
+Use DTOs for application layer transfer objects.
+Use enums for workflow logic and message codes.
+Use message catalog for user-facing messages.
+Use exception handlers for API error responses.
+```
+
+### Frontend Rules
+
+```text
+Each module owns its pages, components, hooks, services, types, and styles.
+Do not put module-specific CSS in global styles.
+Do not hardcode API logic inside React components.
+Do not hardcode repeated messages inside pages.
+Use shared notification module for all success/error/info/warning messages.
+Use shared API client for all backend calls.
+Use shared pagination and filter hooks where possible.
+Use page-specific and component-specific CSS modules.
+Do not use external product names in folders, files, comments, CSS, or UI labels.
+```
+
+---
+
+## 35.5 Updated App Route Mapping
+
+```text
+/login
+    -> modules/auth/pages/LoginPage.tsx
+
+/journals
+    -> modules/journals/pages/WorkQueuePage.tsx
+
+/journals/[journalId]
+    -> modules/journals/pages/JournalDetailPage.tsx
+
+/admin/upload-journal
+    -> modules/admin/pages/JournalUploadPage.tsx
+
+/admin/currency-rates
+    -> modules/admin/pages/CurrencyRatesPage.tsx
+
+/admin/dependency-mapping
+    -> modules/admin/pages/DependencyMappingPage.tsx
+
+/no-access
+    -> simple access denied page, can use shared EmptyState component
+```
+
+---
+
+## 35.6 Updated Backend Controller Mapping
+
+```text
+auth_controller.py
+    POST /api/v1/auth/login
+    GET  /api/v1/auth/me
+    POST /api/v1/auth/switch-role
+    POST /api/v1/auth/refresh-token
+    POST /api/v1/auth/logout
+
+journal_file_controller.py
+    POST /api/v1/journal-files/upload
+    POST /api/v1/journal-files/{fileLoadId}/parse
+    GET  /api/v1/journal-files/{fileLoadId}/parse-result
+    GET  /api/v1/journal-files/{fileLoadId}/parse-errors
+
+work_queue_controller.py
+    GET /api/v1/journals/work-queue?period=MM/YYYY
+
+journal_detail_controller.py
+    GET /api/v1/journals/{journalId}
+    GET /api/v1/journals/{journalId}/lines
+
+certification_controller.py
+    POST /api/v1/journals/{journalId}/certify
+    POST /api/v1/journals/{journalId}/reject
+    POST /api/v1/journals/{journalId}/decertify
+
+journal_document_controller.py
+    POST /api/v1/journals/{journalId}/documents
+    GET  /api/v1/journals/{journalId}/documents
+    GET  /api/v1/journals/{journalId}/documents/{documentId}/download
+    GET  /api/v1/journals/{journalId}/documents/{documentId}/preview
+
+journal_comment_controller.py
+    POST /api/v1/journals/{journalId}/comments
+    GET  /api/v1/journals/{journalId}/comments
+
+journal_hyperlink_controller.py
+    POST /api/v1/journals/{journalId}/hyperlinks
+    GET  /api/v1/journals/{journalId}/hyperlinks
+
+admin_currency_controller.py
+    GET /api/v1/admin/currency-rates
+    GET /api/v1/admin/currency-rates/{rateId}
+
+admin_dependency_mapping_controller.py
+    GET /api/v1/admin/dependency-mappings
+
+health_controller.py
+    GET /api/v1/health
+```
+
+
+---
+
+## 36. Enterprise Controller, Service, and Implementation Naming Convention
+
+The application should use clear enterprise naming instead of the `use_cases` folder name. The folder name `use_cases` is common in Clean Architecture, but for this project the preferred enterprise naming is:
+
+```text
+Controller -> Application Service Interface -> Application Service Implementation -> Domain Service Interface -> Infrastructure Service Implementation -> Repository Interface -> Repository Implementation
+```
+
+### 36.1 Final Naming Decision
+
+Do not use this folder name:
+
+```text
+backend/app/application/use_cases/
+```
+
+Use this instead:
+
+```text
+backend/app/application/services/
+```
+
+Reason:
+
+```text
+The term Application Service is more enterprise-friendly and aligns better with the controller/service/implementation style requested for this project.
+```
+
+### 36.2 Responsibility Split
+
+#### Controller
+
+Controllers handle HTTP only.
+
+Responsibilities:
+
+```text
+Read request
+Validate request schema
+Get current user context
+Call application service
+Return API response
+Do not contain business workflow logic
+Do not directly access repositories
+Do not directly parse files
+Do not directly update journal status
+```
+
+Example folder:
+
+```text
+backend/app/api/v1/controllers/certification_controller.py
+```
+
+#### Application Service Interface
+
+Application service interfaces define orchestration contracts.
+
+Example folder:
+
+```text
+backend/app/application/services/certify_journal_service.py
+```
+
+Example class naming:
+
+```text
+ICertifyJournalService
+IRejectJournalService
+IDecertifyJournalService
+IParseJournalFileService
+IGetWorkQueueByPeriodService
+```
+
+#### Application Service Implementation
+
+Application service implementations orchestrate the full business workflow.
+
+Example folder:
+
+```text
+backend/app/application/services/impl/certify_journal_service_impl.py
+```
+
+Example class naming:
+
+```text
+CertifyJournalServiceImpl
+RejectJournalServiceImpl
+DecertifyJournalServiceImpl
+ParseJournalFileServiceImpl
+GetWorkQueueByPeriodServiceImpl
+```
+
+Responsibilities:
+
+```text
+Validate workflow status
+Validate active role
+Validate journal assignment
+Start transaction
+Call domain services
+Call repositories
+Create audit record
+Flush
+Commit or rollback
+Return application DTO
+```
+
+#### Domain Service Interface
+
+Domain services contain reusable business rules that are not tied to HTTP, database, or UI.
+
+Example folder:
+
+```text
+backend/app/domain/services/certification_workflow_service.py
+```
+
+Example class:
+
+```text
+ICertificationWorkflowService
+```
+
+#### Infrastructure Service Implementation
+
+Infrastructure services implement technical details such as token generation, blob storage, message mapping, parser implementation, or database-specific operations.
+
+Example folder:
+
+```text
+backend/app/infrastructure/services/certification_workflow_service_impl.py
+```
+
+Example class:
+
+```text
+CertificationWorkflowServiceImpl
+```
+
+### 36.3 Updated Application Services Folder
+
+Use this structure:
+
+```text
+backend/app/application/services/
+├── __init__.py
+│
+├── auth/
+│   ├── demo_login_service.py
+│   ├── refresh_token_service.py
+│   ├── logout_service.py
+│   ├── get_logged_in_user_service.py
+│   ├── switch_active_role_service.py
+│   └── impl/
+│       ├── demo_login_service_impl.py
+│       ├── refresh_token_service_impl.py
+│       ├── logout_service_impl.py
+│       ├── get_logged_in_user_service_impl.py
+│       └── switch_active_role_service_impl.py
+│
+├── journal_file/
+│   ├── upload_journal_file_service.py
+│   ├── parse_journal_file_service.py
+│   ├── get_file_parse_result_service.py
+│   ├── get_file_parse_errors_service.py
+│   └── impl/
+│       ├── upload_journal_file_service_impl.py
+│       ├── parse_journal_file_service_impl.py
+│       ├── get_file_parse_result_service_impl.py
+│       └── get_file_parse_errors_service_impl.py
+│
+├── work_queue/
+│   ├── get_work_queue_by_period_service.py
+│   └── impl/
+│       └── get_work_queue_by_period_service_impl.py
+│
+├── journal/
+│   ├── get_journal_detail_service.py
+│   ├── get_journal_audit_service.py
+│   └── impl/
+│       ├── get_journal_detail_service_impl.py
+│       └── get_journal_audit_service_impl.py
+│
+├── certification/
+│   ├── certify_journal_service.py
+│   ├── reject_journal_service.py
+│   ├── decertify_journal_service.py
+│   └── impl/
+│       ├── certify_journal_service_impl.py
+│       ├── reject_journal_service_impl.py
+│       └── decertify_journal_service_impl.py
+│
+├── document/
+│   ├── upload_journal_document_service.py
+│   ├── download_journal_document_service.py
+│   ├── preview_journal_document_service.py
+│   └── impl/
+│       ├── upload_journal_document_service_impl.py
+│       ├── download_journal_document_service_impl.py
+│       └── preview_journal_document_service_impl.py
+│
+├── comment/
+│   ├── add_journal_comment_service.py
+│   └── impl/
+│       └── add_journal_comment_service_impl.py
+│
+├── hyperlink/
+│   ├── add_journal_hyperlink_service.py
+│   └── impl/
+│       └── add_journal_hyperlink_service_impl.py
+│
+└── admin/
+    ├── get_currency_rates_service.py
+    ├── get_dependency_mappings_service.py
+    └── impl/
+        ├── get_currency_rates_service_impl.py
+        └── get_dependency_mappings_service_impl.py
+```
+
+### 36.4 Example Call Flow
+
+```text
+certification_controller.py
+        |
+        v
+ICertifyJournalService
+        |
+        v
+CertifyJournalServiceImpl
+        |
+        v
+ICertificationWorkflowService
+        |
+        v
+CertificationWorkflowServiceImpl
+        |
+        v
+IJournalHeaderRepository / IJournalAssignmentRepository / IJournalAuditRepository
+        |
+        v
+JournalHeaderRepositoryImpl / JournalAssignmentRepositoryImpl / JournalAuditRepositoryImpl
+```
+
+### 36.5 Naming Rules
+
+Use these naming conventions consistently:
+
+```text
+Controller file: certification_controller.py
+Controller class: CertificationController or FastAPI router module
+
+Application service interface file: certify_journal_service.py
+Application service interface class: ICertifyJournalService
+
+Application service implementation file: certify_journal_service_impl.py
+Application service implementation class: CertifyJournalServiceImpl
+
+Domain service interface file: certification_workflow_service.py
+Domain service interface class: ICertificationWorkflowService
+
+Infrastructure service implementation file: certification_workflow_service_impl.py
+Infrastructure service implementation class: CertificationWorkflowServiceImpl
+
+Repository interface file: journal_header_repository.py
+Repository interface class: IJournalHeaderRepository
+
+Repository implementation file: journal_header_repository_impl.py
+Repository implementation class: JournalHeaderRepositoryImpl
+```
+
+### 36.6 Rule for Controllers
+
+Controllers must not instantiate implementation classes directly. They should receive application services through dependency injection.
+
+Correct:
+
+```text
+controller -> interface -> injected implementation
+```
+
+Incorrect:
+
+```text
+controller -> new CertifyJournalServiceImpl()
+```
+
+### 36.7 Rule for Application Services
+
+Application services contain orchestration logic, not low-level technical logic.
+
+They can:
+
+```text
+Call repositories
+Call domain services
+Call infrastructure services through interfaces
+Manage transaction boundaries
+Create audit records
+Return DTOs
+```
+
+They should not:
+
+```text
+Contain raw SQL
+Contain UI logic
+Build HTML
+Access request objects directly
+Import FastAPI router classes
+Hardcode user-facing messages
+```
+
+
+---
+
+## 37. Deployment Notes and From-Scratch Launch Guide
+
+The repository must include a separate deployment and launch guide Markdown file. This file explains how a developer or deployment engineer can create the database, seed master data, start the backend, start the frontend, and prepare the application for AWS deployment.
+
+Required file:
+
+```text
+docs/11_Deployment_and_Launch_Guide.md
+```
+
+This guide should be maintained as a first-class project document and updated whenever setup, database, environment variables, or deployment steps change.
+
+---
+
+### 37.1 Database Script Folder Structure
+
+Database SQL files must be kept in a dedicated `db` folder. The folder should include schema scripts, seed scripts, optional rollback scripts, and helper scripts.
+
+Recommended structure:
+
+```text
+backend/
+├── db/
+│   ├── README.md
+│   │
+│   ├── schema/
+│   │   ├── 001_create_users_and_roles.sql
+│   │   ├── 002_create_sessions_and_tokens.sql
+│   │   ├── 003_create_journal_file_load.sql
+│   │   ├── 004_create_journal_core_tables.sql
+│   │   ├── 005_create_journal_supporting_tables.sql
+│   │   ├── 006_create_dependency_mapping_tables.sql
+│   │   ├── 007_create_currency_tables.sql
+│   │   ├── 008_create_config_and_message_tables.sql
+│   │   └── 009_create_indexes.sql
+│   │
+│   ├── seed/
+│   │   ├── 001_seed_roles.sql
+│   │   ├── 002_seed_demo_users.sql
+│   │   ├── 003_seed_user_roles.sql
+│   │   ├── 004_seed_teams.sql
+│   │   ├── 005_seed_role_external_mapping.sql
+│   │   ├── 006_seed_dependency_mapping.sql
+│   │   ├── 007_seed_rejection_reasons.sql
+│   │   ├── 008_seed_currency_rates.sql
+│   │   ├── 009_seed_certification_statements.sql
+│   │   └── 010_seed_app_config.sql
+│   │
+│   ├── rollback/
+│   │   ├── rollback_schema.sql
+│   │   └── truncate_seed_data.sql
+│   │
+│   └── scripts/
+│       ├── create_database.sql
+│       ├── run_all_schema.sql
+│       ├── run_all_seed.sql
+│       └── reset_database.sql
+```
+
+Rules:
+
+```text
+Schema scripts must be numbered and repeatable in order.
+Seed scripts must be separate from schema scripts.
+Never mix table creation and seed data in the same file.
+Use one README.md inside backend/db to explain script execution order.
+```
+
+---
+
+### 37.2 Local Launch Guide Content
+
+The `docs/11_Deployment_and_Launch_Guide.md` file must include these sections:
+
+```text
+1. Prerequisites
+2. Repository structure
+3. Environment variable setup
+4. Database creation
+5. Schema creation
+6. Seed data loading
+7. Backend setup and launch
+8. Frontend setup and launch
+9. Login with demo users
+10. Upload and parse workflow verification
+11. Common troubleshooting
+12. AWS deployment notes
+```
+
+---
+
+### 37.3 Local Prerequisites
+
+The launch guide should list the local prerequisites:
+
+```text
+Python 3.11+
+Node.js LTS
+npm or pnpm
+PostgreSQL
+psql command line tool
+Git
+```
+
+No Docker commands should be included for the current phase because container setup is not used right now.
+
+---
+
+### 37.4 Local Database Setup
+
+Example database creation steps:
+
+```bash
+psql -U postgres -f backend/db/scripts/create_database.sql
+psql -U postgres -d journal_certification -f backend/db/scripts/run_all_schema.sql
+psql -U postgres -d journal_certification -f backend/db/scripts/run_all_seed.sql
+```
+
+Recommended database name:
+
+```text
+journal_certification
+```
+
+Recommended database user for local development:
+
+```text
+journal_app_user
+```
+
+The guide should clearly explain how to update the backend `.env` file with the database connection string.
+
+Example:
+
+```text
+DATABASE_URL=postgresql+asyncpg://journal_app_user:<password>@localhost:5432/journal_certification
+```
+
+---
+
+### 37.5 Backend Launch Steps
+
+Backend launch should be documented as:
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+The repository may include a helper script:
+
+```text
+backend/run_api.sh
+```
+
+Example:
+
+```bash
+cd backend
+sh run_api.sh
+```
+
+---
+
+### 37.6 Frontend Launch Steps
+
+Frontend launch should be documented as:
+
+```bash
+cd frontend
+npm install
+cp .env.example .env.local
+npm run dev
+```
+
+The repository may include a helper script:
+
+```text
+frontend/run_ui.sh
+```
+
+Example:
+
+```bash
+cd frontend
+sh run_ui.sh
+```
+
+Frontend environment variable example:
+
+```text
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1
+```
+
+---
+
+### 37.7 Demo Login Verification
+
+The guide should include seeded demo users and roles.
+
+Example:
+
+```text
+Local Admin user -> Upload Journal, Currency Conversion, Dependency Mapping
+Preparer/Reconciler user -> Work Queue, Certify, View, Decertify
+Approver user -> Work Queue, Approve, Reject
+```
+
+Do not document real passwords in the architecture file. Demo passwords should be placed in local seed/setup notes or provided through secure internal team communication.
+
+---
+
+### 37.8 AWS Deployment Notes
+
+The launch guide should include AWS deployment notes for the future cloud deployment. Since Docker is not used in the current phase, the first AWS deployment option can be VM-based or managed-runtime based.
+
+Recommended AWS components to evaluate:
+
+```text
+Amazon RDS for PostgreSQL
+AWS Elastic Beanstalk or EC2 for FastAPI backend
+AWS Amplify, S3 + CloudFront, or another approved static hosting option for Next.js frontend
+AWS Secrets Manager or SSM Parameter Store for secrets
+AWS CloudWatch for logs and monitoring
+Application Load Balancer or API Gateway for routing if required
+```
+
+AWS deployment notes should include:
+
+```text
+Environment variable setup
+Database connection through RDS
+Backend process management
+Frontend build command
+Frontend environment configuration
+HTTPS/TLS setup
+Secrets management
+Log location
+Rollback approach
+```
+
+---
+
+### 37.9 Environment Variables
+
+Backend `.env.example` should include:
+
+```text
+APP_NAME=Journal Certification Portal
+APP_ENV=local
+DATABASE_URL=
+JWT_SECRET_KEY=
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=60
+REFRESH_TOKEN_EXPIRE_HOURS=12
+CORS_ALLOWED_ORIGINS=http://localhost:3000
+```
+
+Frontend `.env.example` should include:
+
+```text
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1
+NEXT_PUBLIC_APP_NAME=Journal Certification Portal
+```
+
+Never commit real secrets.
+
+---
+
+### 37.10 Deployment Guide Acceptance Criteria
+
+The deployment and launch guide is complete only if a new developer can follow it and successfully:
+
+```text
+Create PostgreSQL database.
+Run schema scripts.
+Run seed scripts.
+Start FastAPI backend.
+Start Next.js frontend.
+Log in with demo users.
+Upload a JDE journal file.
+Click Parse.
+See records in Preparer/Reconciler work queue.
+Certify a journal.
+Approve or reject as Approver.
+View audit trail.
 ```
 
 ---
