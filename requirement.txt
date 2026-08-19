@@ -1,0 +1,4141 @@
+# Journal Certification Pilot Application Architecture
+
+## Phase 1 MVP: Manual Journal Upload, Role-Based Work Queue, Preparer Certification, Approver Certification, Admin Currency View
+
+### Document Version
+
+| Item | Value |
+|---|---|
+| Application | Journal Certification Pilot |
+| Scope | Phase 1 MVP |
+| Backend | Python, FastAPI |
+| Frontend | React.js, Next.js |
+| Database | PostgreSQL |
+| File Source | Manual upload only for Phase 1 |
+| Authentication | Demo login with seeded users and roles |
+| Deferred | S3/SFTP ingestion, SSO, full user management UI, email notifications, automated currency feed |
+
+---
+
+## 1. Purpose
+
+This document defines the updated Phase 1 architecture for the Journal Certification Pilot application.
+
+The design is based on the provided journal text file, journal template, requirement sheet, and screenshot-driven UI behavior. The Phase 1 application will focus on a small but enterprise-ready workflow:
+
+1. Manual upload of a tab-delimited journal text file.
+2. Parsing the file into journal header and journal line records.
+3. Routing journals to a Preparer/Reconciler work queue.
+4. Allowing the Preparer/Reconciler to review, attach documents, add comments, and certify.
+5. Routing certified journals to an Approver work queue.
+6. Allowing the Approver to review, certify, or reject.
+7. Supporting users with multiple roles through a top-right user/role dropdown.
+8. Enforcing that the same user cannot be both preparer and approver for the same journal.
+9. Supporting document upload, document preview, and direct download.
+10. Showing an Admin currency conversion immutable grid.
+11. Keeping all key table schemas ready for Phase 1 and future extension.
+
+---
+
+## 2. Confirmed Understanding From Uploaded Files
+
+### 2.1 Journal Text File Format
+
+The uploaded journal text file is tab-delimited. Each journal row contains 27 fields separated by the tab character `\t`.
+
+Parser configuration:
+
+```python
+delimiter = "\t"
+expected_column_count = 27
+```
+
+The parser must not use comma, pipe, or space-based parsing because several fields have leading spaces, trailing spaces, and padded blanks.
+
+### 2.2 Journal Template Fields
+
+The Journal Template defines the following 27 fields:
+
+1. DocumentType
+2. DocumentNumber
+3. GLDate
+4. PeriodNumber
+5. FiscalYear
+6. BatchNumber
+7. BatchDate
+8. LedgerType
+9. ReverseOrVoid
+10. Preparer
+11. BusinessUnit
+12. ObjectAccount
+13. Subsidiary
+14. Subledger
+15. Amount
+16. Explanation1
+17. Explanation2
+18. CompanyCode
+19. BatchType
+20. Currency
+21. ExchangeRate
+22. JE Line Number
+23. SublederType
+24. GLPostStatus
+25. AssetNumber
+26. Last Modified By
+27. AccountDescription
+
+### 2.3 Screenshot-Based UI Understanding
+
+The screenshot document shows a enterprise-style layout with these key patterns:
+
+- A post-login landing screen.
+- A journal grid where user actions appear in the first column area.
+- A detailed journal view containing header details, line items, comments, supporting documents, hyperlinks, and certification controls.
+- A certification/audit trace area showing who acted, when they acted, and what action/status was captured.
+- A role-based experience where users see actions according to their current responsibility.
+
+For Phase 1, the UI should follow this pattern but only implement the minimum necessary Preparer/Reconciler, Approver, and Local Admin flows.
+
+---
+
+## 3. Phase 1 Scope
+
+### 3.1 In Scope
+
+| Area | Phase 1 Behavior |
+|---|---|
+| Login | Demo login with seeded users |
+| User Roles | Users can have multiple roles |
+| Active Role | User selects active role from top-right dropdown |
+| Journal Upload | Manual upload from UI |
+| Journal Parser | Tab-delimited text parser, 27 expected columns |
+| Journal Storage | Header and line tables |
+| Period Filter | Mandatory top filter in MM/YYYY format |
+| Secondary Filters | Grid filters below period, auto-filter after more than 2 characters |
+| Preparer/Reconciler Screen | Journal list, detail, comments, document upload, hyperlink, certify |
+| Approver Screen | Review preparer inputs, certify, reject |
+| Admin Screen | Currency conversion immutable grid |
+| Supporting Documents | Upload any file type, list, preview, download |
+| Document Storage | Store file content as database BLOB/BYTEA for Phase 1 |
+| Audit Trail | Capture key workflow actions |
+| Currency Conversion | Seed/config-based table for now |
+
+### 3.2 Out of Scope / Deferred
+
+| Area | Deferred Future Phase |
+|---|---|
+| S3 ingestion | Deferred |
+| SFTP ingestion for journal files | Deferred |
+| JDE currency file SFTP feed | Deferred |
+| SSO login | Deferred |
+| Full user management UI | Deferred |
+| Approval matrix UI | Deferred |
+| Email notifications | Deferred |
+| Scheduler | Deferred |
+| Webhook | Not required for Phase 1 |
+| Full dashboard analytics | Deferred |
+
+---
+
+## 4. Recommended Tech Stack
+
+### 4.1 Backend
+
+| Component | Recommendation | Purpose |
+|---|---|---|
+| Language | Python 3.11+ | Backend application |
+| API Framework | FastAPI | REST APIs |
+| Validation | Pydantic v2 | Request/response models |
+| ORM | SQLAlchemy 2.x | Database access |
+| Migration | Alembic | Database migrations |
+| Database | PostgreSQL | System of record |
+| File BLOB Storage | PostgreSQL BYTEA | Store supporting documents in DB for Phase 1 |
+| Journal Source File Storage | PostgreSQL BYTEA plus parsed metadata | Keep uploaded source files traceable in DB |
+| Auth Phase 1 | Demo credential login | Seeded users only |
+| Auth Future | Microsoft Entra ID / SSO | Enterprise authentication |
+| Testing | pytest | Unit and integration testing |
+
+### 4.2 Frontend
+
+| Component | Recommendation | Purpose |
+|---|---|---|
+| Framework | Next.js | React application framework |
+| UI Library | React.js | Component-based UI |
+| Language | TypeScript | Strong typing |
+| Grid | MUI DataGrid or AG Grid | Journal and currency grids |
+| State/API | TanStack Query | API fetching, caching, refresh |
+| Forms | React Hook Form | Upload and certification forms |
+| Validation | Zod | Frontend schema validation |
+| Styling | MUI or Tailwind CSS | Enterprise UI styling |
+
+Recommended combination:
+
+```text
+FastAPI + PostgreSQL + SQLAlchemy + Alembic
+Next.js + React + TypeScript + MUI + MUI DataGrid
+```
+
+---
+
+## 5. Core Architecture
+
+```text
++------------------------------------------------+
+|                  Next.js UI                    |
+| Header + Role Switcher + Role-Based Pages      |
++-----------------------+------------------------+
+                        |
+                        | REST API
+                        v
++------------------------------------------------+
+|                    FastAPI                     |
+| Controllers, Use Cases, Validation, Auth       |
++-----------------------+------------------------+
+                        |
+                        v
++------------------------------------------------+
+|              Application Layer                 |
+| Upload, Parse, Assign, Certify, Reject         |
++-----------------------+------------------------+
+                        |
+                        v
++------------------------------------------------+
+|                  Domain Layer                  |
+| Entities, Services, Rules, Interfaces          |
++-----------------------+------------------------+
+                        |
+                        v
++------------------------------------------------+
+|              Infrastructure Layer              |
+| SQLAlchemy, PostgreSQL, BLOB Documents         |
++-----------------------+------------------------+
+                        |
+                        v
++------------------------------------------------+
+|                  PostgreSQL                    |
+| Journals, Workflow, Roles, Documents, Audit    |
++------------------------------------------------+
+```
+
+---
+
+## 6. Role Model
+
+### 6.1 Role Principle
+
+One user can have multiple roles.
+
+Example:
+
+```text
+User: john.smith
+Roles:
+- Preparer/Reconciler
+- Approver
+- Reviewer
+```
+
+The user will select the active working role from the user profile dropdown at the top-right of the UI.
+
+### 6.2 Supported Generic Roles
+
+Store technical role codes in the database. Display friendly labels in the UI.
+
+| Role Code | UI Display Name |
+|---|---|
+| ACCOUNT_MANAGER | Account Manager |
+| ACCOUNT_REVIEWER | Account Reviewer |
+| APPROVER | Approver |
+| EXECUTIVE | Executive |
+| EXTERNAL_AUDITOR | External Auditor |
+| FINANCIAL_MANAGER | Financial Manager |
+| FINANCIAL_REVIEWER | Financial Reviewer |
+| INTERNAL_AUDITOR | Internal Auditor |
+| LOCAL_ADMIN | Local Admin |
+| PREPARER_RECONCILER | Preparer/Reconciler |
+| REVIEWER | Reviewer |
+
+### 6.3 Phase 1 Active Roles
+
+Phase 1 only needs to functionally implement:
+
+```text
+PREPARER_RECONCILER
+APPROVER
+LOCAL_ADMIN
+```
+
+Other roles should be seeded or available in role master for future compatibility, but they do not need full screens now.
+
+---
+
+## 7. Top-Right User and Role Dropdown
+
+### 7.1 UI Behavior
+
+The top-right user area should show:
+
+```text
+Display Name
+Email
+Current Active Role
+Dropdown of assigned roles only
+```
+
+Example:
+
+```text
+Tribikram Tripathy
+tribikram@company.com
+Active Role: [Preparer/Reconciler ▼]
+```
+
+If the user has only one role, the dropdown can still be visible but will contain only one option.
+
+### 7.2 Role Switching Rule
+
+When the user changes active role:
+
+1. UI updates navigation menu.
+2. UI calls backend to update active role in session.
+3. Backend validates that the user owns that role.
+4. All subsequent journal queries are filtered by active role.
+
+### 7.3 Auth API Shape
+
+```http
+GET /api/v1/auth/me
+```
+
+Example response:
+
+```json
+{
+  "user_id": "USR001",
+  "username": "demo_user_1",
+  "display_name": "Demo User One",
+  "email": "demo.user1@example.com",
+  "active_role": "PREPARER_RECONCILER",
+  "roles": [
+    {
+      "role_code": "PREPARER_RECONCILER",
+      "role_name": "Preparer/Reconciler"
+    },
+    {
+      "role_code": "APPROVER",
+      "role_name": "Approver"
+    }
+  ]
+}
+```
+
+```http
+POST /api/v1/auth/switch-role
+```
+
+Request:
+
+```json
+{
+  "role_code": "APPROVER"
+}
+```
+
+---
+
+## 8. Critical Workflow Rule: Same User Cannot Prepare and Approve Same Journal
+
+### 8.1 Business Rule
+
+The same user must not certify the same journal as both Preparer/Reconciler and Approver.
+
+Invalid assignment:
+
+```text
+Journal: JRN001
+Preparer/Reconciler: USR001
+Approver: USR001
+```
+
+Valid assignment:
+
+```text
+Journal: JRN001
+Preparer/Reconciler: USR001
+Approver: USR002
+```
+
+### 8.2 Where to Enforce
+
+Enforce this rule in three places:
+
+1. During journal assignment after file upload.
+2. During Preparer certification before moving to Approver.
+3. During Approver certification before final close.
+
+### 8.3 Backend Validation
+
+```python
+if preparer_user_id == approver_user_id:
+    raise BusinessValidationException(
+        "Preparer/Reconciler and Approver cannot be the same user for the same journal."
+    )
+```
+
+### 8.4 Database Check Strategy
+
+A direct SQL CHECK constraint is difficult because assignments are stored in multiple rows. Use application validation and add a database trigger later if needed.
+
+For Phase 1, use:
+
+```text
+Application validation + integration test coverage
+```
+
+---
+
+## 9. Period and Filter Strategy
+
+### 9.1 Top Filter: Period
+
+Period is the primary mandatory filter at the top of the journal screen.
+
+Format:
+
+```text
+MM/YYYY
+```
+
+Example:
+
+```text
+07/2026
+```
+
+Purpose:
+
+```text
+Performance optimization and UI rendering control
+```
+
+The user must select period first. Journals are loaded only for the selected period.
+
+### 9.2 Screen Layout
+
+```text
++------------------------------------------------------------+
+| Period * [ 07/2026 ▼ ]                                    |
++------------------------------------------------------------+
+
++------------------------------------------------------------+
+| Secondary grid filters                                     |
+| Journal ID | Document No | Company | Currency | Status ... |
++------------------------------------------------------------+
+
++------------------------------------------------------------+
+| Journal Grid                                               |
++------------------------------------------------------------+
+```
+
+### 9.3 Primary Query Pattern
+
+Preparer/Reconciler:
+
+```sql
+SELECT j.*
+FROM journal_header j
+JOIN journal_assignment a ON a.journal_id = j.journal_id
+WHERE j.journal_period = :period
+  AND a.assigned_user_id = :logged_in_user
+  AND a.role_code = 'PREPARER_RECONCILER'
+  AND j.status IN ('PENDING_PREPARER', 'PREPARER_IN_PROGRESS', 'REJECTED');
+```
+
+Approver:
+
+```sql
+SELECT j.*
+FROM journal_header j
+JOIN journal_assignment a ON a.journal_id = j.journal_id
+WHERE j.journal_period = :period
+  AND a.assigned_user_id = :logged_in_user
+  AND a.role_code = 'APPROVER'
+  AND j.status = 'PENDING_APPROVER';
+```
+
+### 9.4 Secondary Filters
+
+Secondary filters should appear with the grid, similar to the previous screenshot-style filter behavior.
+
+Examples:
+
+```text
+Journal ID
+Document Number
+Batch Number
+Company Code
+Currency
+Status
+Preparer
+Approver
+Template
+Team
+```
+
+### 9.5 Auto-Filter Rule
+
+Auto-filter only when the typed value is more than 2 characters.
+
+Rule:
+
+```text
+Length 0: clear filter
+Length 1: do not trigger search
+Length 2: do not trigger search
+Length 3 or more: trigger auto-filter
+```
+
+Recommended UI debounce:
+
+```text
+500 ms
+```
+
+This gives a responsive UI without calling the backend on every keystroke.
+
+### 9.6 Filter Implementation Approach
+
+Only the Period filter causes an API call and database lookup. All other grid filters are handled in the browser using React, Next.js, and JavaScript against the period-loaded dataset.
+
+Recommended Phase 1 approach:
+
+```text
+Period filter: server-side mandatory
+Secondary filters: client-side only
+No database hit for Journal ID, Document Number, Company Code, Currency, Status, Preparer, Approver, Template, or Team filters
+```
+
+Data flow:
+
+```text
+User selects Period MM/YYYY
+        |
+        v
+Frontend calls work queue API once
+        |
+        v
+Backend queries database by period, active role, and assigned user
+        |
+        v
+Frontend stores returned rows in React state
+        |
+        v
+Secondary filters run purely in UI memory
+```
+
+Frontend state model:
+
+```typescript
+const [allJournals, setAllJournals] = useState<JournalRow[]>([]);
+const [filteredJournals, setFilteredJournals] = useState<JournalRow[]>([]);
+const [filters, setFilters] = useState<JournalGridFilters>({});
+```
+
+Filtering rule:
+
+```text
+Length 0: clear that filter and show records from the loaded period dataset
+Length 1: do not apply filter
+Length 2: do not apply filter
+Length 3 or more: apply client-side filter
+```
+
+Use a 300 to 500 ms debounce only to avoid unnecessary React re-rendering while the user is typing. The debounce must not call the backend for secondary filters.
+
+
+---
+
+## 10. JDE ADID-Based Dependency Mapping
+
+### 10.1 Why This Mapping Is Needed
+
+The journal source text file contains the ADID of the Preparer in the `Preparer` field. The application should not treat that value as only display text. It must use that ADID to identify the application user who receives the journal in the Preparer/Reconciler queue.
+
+Once the Preparer is identified, the application must identify the Approver using the dependency mapping. This ensures that the journal workflow is not hardcoded and can follow the actual JDE/BlackLine dependency relationship.
+
+### 10.2 Mapping Flow
+
+```text
+Journal text file uploaded by Local Admin
+        |
+        v
+Parser reads Preparer field from text file
+        |
+        v
+Preparer field value is treated as Preparer ADID
+        |
+        v
+System resolves Preparer ADID to users.adid
+        |
+        v
+System looks up dependency mapping for Preparer ADID
+        |
+        v
+System resolves Approver ADID to users.adid
+        |
+        v
+System validates Preparer user != Approver user
+        |
+        v
+System creates journal_assignment rows
+```
+
+### 10.3 Role Codes From Dependency Mapping
+
+The dependency relationship uses operational role codes:
+
+```text
+BLPREPARER
+BLAPPROVER
+```
+
+Application role mapping:
+
+```text
+BLPREPARER -> PREPARER_RECONCILER
+BLAPPROVER -> APPROVER
+```
+
+If upstream sends `BLAPPOVER`, normalize it to `BLAPPROVER` before applying the mapping.
+
+### 10.4 Admin Dependency Mapping Screen
+
+The Admin should be able to view the dependency mapping screen. This screen shows how the system determines who is the Preparer and who is the Approver.
+
+Accessible by active role:
+
+```text
+LOCAL_ADMIN
+```
+
+The screen is view-only for Phase 1 unless explicitly enabled later for admin maintenance.
+
+Grid columns:
+
+```text
+Preparer ADID
+Preparer Name
+Preparer User ID
+Preparer Role Code
+Approver ADID
+Approver Name
+Approver User ID
+Approver Role Code
+Company Code
+Region
+Team
+Effective From
+Effective To
+Source System
+Source File Name
+Active Flag
+```
+
+Filter behavior:
+
+```text
+Initial screen load calls backend once to load dependency mapping rows.
+All bottom/grid filters are UI-only.
+No database hit for Preparer ADID, Approver ADID, Company Code, Region, Team, or Active Flag filtering.
+Filter is applied in React/Next.js/JavaScript against loaded rows.
+Trigger client-side filtering only when the typed value is more than 2 characters.
+```
+
+### 10.5 Dependency Mapping API
+
+```http
+GET /api/v1/admin/dependency-mappings
+```
+
+This endpoint is called only when the Admin opens the dependency mapping screen or refreshes it. UI filters do not call this endpoint.
+
+### 10.6 Assignment Validation Rules
+
+During journal upload and assignment creation:
+
+```text
+Preparer ADID must exist in users.adid.
+Approver ADID must exist in users.adid.
+Preparer must have BLPREPARER mapped to PREPARER_RECONCILER access.
+Approver must have BLAPPROVER mapped to APPROVER access.
+Preparer user and Approver user must not be the same user.
+If dependency mapping is missing, journal should be marked FAILED or ASSIGNMENT_ERROR and shown in upload processing results.
+```
+
+Recommended upload error message:
+
+```text
+Approver mapping not found for Preparer ADID: <adid>
+```
+
+Recommended same-user validation message:
+
+```text
+Preparer and Approver cannot be the same user for the same journal.
+```
+
+---
+
+## 10. Phase 1 Workflow
+
+### 10.1 Journal Upload Flow
+
+```text
+Local Admin uploads journal source text file
+        |
+        v
+System stores uploaded source file in DB as BYTEA
+        |
+        v
+System creates journal_file_load record
+        |
+        v
+System reads source file as tab-delimited text
+        |
+        v
+System validates each row has 27 columns
+        |
+        v
+System groups rows into journal_header records
+        |
+        v
+System creates journal_line records
+        |
+        v
+System resolves Preparer/Reconciler from source file
+        |
+        v
+System resolves Approver from seeded approval matrix
+        |
+        v
+System validates Preparer/Reconciler != Approver
+        |
+        v
+System creates journal_assignment rows
+        |
+        v
+Journal status = PENDING_PREPARER
+        |
+        v
+Journal appears in Preparer/Reconciler work queue for selected period
+```
+
+### 10.2 Preparer/Reconciler Flow
+
+```text
+User logs in
+        |
+        v
+User selects active role = Preparer/Reconciler
+        |
+        v
+User opens Journals screen
+        |
+        v
+User selects Period MM/YYYY from top filter
+        |
+        v
+System loads journals for period and active role
+        |
+        v
+User optionally uses secondary grid filters
+        |
+        v
+User opens one journal
+        |
+        v
+User reviews header and line details
+        |
+        v
+User adds comments, documents, hyperlinks
+        |
+        v
+User certifies
+        |
+        v
+System validates assigned approver is not same user
+        |
+        v
+System updates current assignment complete
+        |
+        v
+System updates journal status = PENDING_APPROVER
+        |
+        v
+Journal appears in assigned Approver's work queue
+```
+
+### 10.3 Approver Flow
+
+```text
+User logs in
+        |
+        v
+User selects active role = Approver
+        |
+        v
+User opens Journals screen
+        |
+        v
+User selects Period MM/YYYY from top filter
+        |
+        v
+System loads journals pending approval for selected period
+        |
+        v
+User opens one journal
+        |
+        v
+User reviews header, lines, comments, documents, hyperlinks, preparer certification
+        |
+        v
+User certifies or rejects
+        |
+        v
+If certified: journal status = CLOSED
+        |
+        v
+If rejected: journal status = REJECTED and returns to Preparer/Reconciler queue
+```
+
+### 10.4 Local Admin Flow
+
+```text
+User logs in
+        |
+        v
+User selects active role = Local Admin
+        |
+        v
+User can upload journal source file
+        |
+        v
+User can view immutable currency conversion grid
+```
+
+---
+
+## 11. Journal Status Model
+
+Use status values that align to the work queue model.
+
+```text
+DRAFT
+PENDING_PREPARER
+PREPARER_IN_PROGRESS
+PREPARER_COMPLETED
+PENDING_APPROVER
+APPROVER_IN_PROGRESS
+APPROVER_COMPLETED
+REJECTED
+DECERTIFIED
+CLOSED
+FAILED
+```
+
+For Phase 1, the main statuses are:
+
+```text
+PENDING_PREPARER
+PREPARER_IN_PROGRESS
+PENDING_APPROVER
+REJECTED
+CLOSED
+FAILED
+```
+
+---
+
+## 12. Assignment Status Model
+
+```text
+ASSIGNED
+IN_PROGRESS
+COMPLETED
+REJECTED
+SKIPPED
+```
+
+Each journal will have at least two assignment rows:
+
+```text
+PREPARER_RECONCILER assignment
+APPROVER assignment
+```
+
+---
+
+## 13. Header and Line Split Logic
+
+### 13.1 Header Grouping Key
+
+Create one journal header for each unique combination of:
+
+```text
+DocumentType
+DocumentNumber
+GLDate
+PeriodNumber
+FiscalYear
+BatchNumber
+BatchDate
+LedgerType
+CompanyCode
+BatchType
+Currency
+Preparer
+```
+
+### 13.2 Line Creation
+
+Each text file row becomes one `journal_line` record.
+
+### 13.3 Debit and Credit Calculation
+
+```text
+If Amount > 0, add to Total Debit
+If Amount < 0, add absolute value to Total Credit
+```
+
+### 13.4 USD Calculation
+
+```text
+amount_usd = amount * conversion_rate
+```
+
+For header totals:
+
+```text
+total_debit_usd = total_debit * conversion_rate
+total_credit_usd = total_credit * conversion_rate
+```
+
+---
+
+## 14. Screen-Level Design
+
+## 14.1 Login Screen
+
+For Phase 1:
+
+- Demo user login.
+- No SSO.
+- No user management UI.
+
+Seed users should support multi-role testing.
+
+Recommended seed users:
+
+| Username | Assigned Roles | Purpose |
+|---|---|---|
+| user_preparer_approver | Preparer/Reconciler, Approver | Test role switcher, but not same-journal approval |
+| user_approver_reviewer | Approver, Reviewer | Test approval and future reviewer role |
+| user_admin | Local Admin | Upload file and view currency grid |
+
+Important assignment rule:
+
+```text
+Even if user_preparer_approver has both roles, the same journal cannot be assigned to that same user as both Preparer/Reconciler and Approver.
+```
+
+---
+
+## 14.2 Header User Menu
+
+Display at top-right:
+
+```text
+Display Name
+Email
+Active Role Dropdown
+```
+
+Dropdown values come from `user_roles` table and must show only roles assigned to logged-in user.
+
+When active role changes:
+
+```text
+Navigation changes
+Journal work queue changes
+Allowed actions change
+```
+
+---
+
+## 14.3 Journal Upload Screen
+
+Accessible by:
+
+```text
+LOCAL_ADMIN
+```
+
+Components:
+
+```text
+Page title: Upload Journal File
+Upload control
+Selected file name
+Upload button
+Processing status
+Validation error summary
+Parsed row count
+Created journal count
+```
+
+Phase 1 source journal parser supports:
+
+```text
+.txt tab-delimited source file
+```
+
+Supporting document upload allows any file type, but source journal creation is based on the tab-delimited text file only.
+
+---
+
+## 14.4 Work Queue Screen for Preparer/Reconciler and Approver
+
+Use one reusable Work Queue screen whose behavior changes based on active role.
+
+### Top Area
+
+```text
+Period * [ MM/YYYY dropdown ]
+```
+
+### Secondary Filter Area
+
+Shown below period and above the grid.
+
+```text
+Journal ID
+Document Number
+Batch Number
+Company Code
+Currency
+Status
+Preparer
+Approver
+Template
+Team
+```
+
+### Filter Behavior
+
+```text
+Trigger filter only when input length > 2
+Use 500 ms debounce
+Always include selected period in backend query
+```
+
+### No Records Found
+
+If no journals exist for selected period and role:
+
+```text
+Show page header
+Show period filter
+Show message: No records found
+```
+
+---
+
+## 14.5 Preparer/Reconciler Detail Screen
+
+Header section:
+
+```text
+Journal ID
+Document Type
+Document Number
+GL Date
+Period Number
+Fiscal Year
+Batch Number
+Batch Date
+Ledger Type
+Reverse Or Void
+Preparer/Reconciler
+Approver
+Company Code
+Batch Type
+Currency
+Exchange Rate from file
+Conversion Rate to USD
+Total Debit
+Total Credit
+Total Debit USD
+Total Credit USD
+Status
+Template
+Team
+```
+
+Line grid:
+
+```text
+Select
+JE Line Number
+Business Unit
+Object Account
+Subsidiary
+Subledger
+Amount
+Amount USD
+Explanation 1
+Explanation 2
+GL Post Status
+Asset Number
+Last Modified By
+Account Description
+```
+
+Supporting sections:
+
+```text
+Comments
+Supporting Documents
+Hyperlinks
+Certification Statement
+```
+
+Buttons:
+
+```text
+Save
+Certify
+Cancel
+Back
+```
+
+Certify behavior:
+
+1. Validate certification confirmation.
+2. Validate assigned approver exists.
+3. Validate assigned approver is not the same user.
+4. Insert certification record.
+5. Insert audit log.
+6. Complete Preparer/Reconciler assignment.
+7. Activate Approver assignment.
+8. Update journal status to `PENDING_APPROVER`.
+
+---
+
+## 14.6 Approver Detail Screen
+
+Approver sees the same journal detail sections plus Preparer/Reconciler evidence.
+
+Additional visibility:
+
+```text
+Preparer/Reconciler comments
+Preparer/Reconciler attachments
+Preparer/Reconciler hyperlinks
+Preparer/Reconciler certification details
+```
+
+Approver can add:
+
+```text
+Approver comments
+Approver attachments
+Approver hyperlinks
+```
+
+Buttons:
+
+```text
+Certify
+Reject
+Back
+```
+
+Certify behavior:
+
+1. Validate active role is `APPROVER`.
+2. Validate logged-in user is assigned approver.
+3. Validate logged-in user is not the same user who prepared the journal.
+4. Insert certification record.
+5. Complete approver assignment.
+6. Insert audit log.
+7. Update journal status to `CLOSED` for Phase 1.
+
+Reject behavior:
+
+1. Reason/comment is mandatory.
+2. User selects reason from dropdown.
+3. Insert certification record with `REJECTED`.
+4. Insert audit log.
+5. Update journal status to `REJECTED`.
+6. Reopen Preparer/Reconciler assignment if rework is supported.
+
+Recommended Phase 1 behavior:
+
+```text
+Rejected journals appear in Preparer/Reconciler queue for the same period.
+Preparer/Reconciler can update comments/documents and certify again.
+```
+
+---
+
+## 14.7 Supporting Documents Section
+
+### Requirements
+
+Users can upload any file type:
+
+```text
+PDF
+DOC/DOCX
+XLS/XLSX
+TXT
+CSV
+Images
+Other files
+```
+
+### UI Grid Columns
+
+```text
+Download Icon
+View Icon
+Document Name
+Document Type
+Uploaded By
+Uploaded Role
+Uploaded At
+Description
+```
+
+### Icon Behavior
+
+- Download icon should appear immediately before the document name.
+- Clicking download icon should trigger direct download.
+- Clicking view icon should open document preview in a new browser tab.
+- If browser preview is unsupported, show: `Preview not available. Please download the file.`
+
+### Backend Behavior
+
+For Phase 1:
+
+```text
+Store metadata in journal_document table.
+Store actual file content in PostgreSQL BYTEA column.
+```
+
+Future phase:
+
+```text
+Move file content to S3/object storage.
+Keep metadata and object key in database.
+```
+
+---
+
+## 14.8 Admin Currency Conversion Screen
+
+Accessible by active role:
+
+```text
+LOCAL_ADMIN
+```
+
+Current Phase:
+
+```text
+Immutable grid
+Filter enabled
+Sort enabled
+No create/edit/delete
+```
+
+Grid columns:
+
+```text
+From Currency
+To Currency
+Conversion Rate
+Effective From
+Effective To
+Source System
+Source File Name
+Loaded At
+Active Flag
+```
+
+Future Phase:
+
+```text
+Every fortnight, system reads latest currency conversion file from JDE over SFTP and updates the table.
+```
+
+---
+
+# 15. Full Database Schema
+
+The following schema supports Phase 1 and future extensions.
+
+---
+
+## 15.1 users
+
+```sql
+CREATE TABLE users (
+    id BIGSERIAL PRIMARY KEY,
+    user_id VARCHAR(100) UNIQUE NOT NULL,
+    adid VARCHAR(100) UNIQUE,
+    username VARCHAR(100) UNIQUE NOT NULL,
+    display_name VARCHAR(255) NOT NULL,
+    email VARCHAR(255),
+    password_hash VARCHAR(500),
+    auth_provider VARCHAR(50) NOT NULL DEFAULT 'LOCAL',
+    sso_subject VARCHAR(255),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+---
+
+## 15.2 roles
+
+```sql
+CREATE TABLE roles (
+    id BIGSERIAL PRIMARY KEY,
+    role_code VARCHAR(50) UNIQUE NOT NULL,
+    role_name VARCHAR(100) NOT NULL,
+    ui_display_name VARCHAR(150) NOT NULL,
+    description TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+Seed role values:
+
+```sql
+INSERT INTO roles (role_code, role_name, ui_display_name) VALUES
+('ACCOUNT_MANAGER', 'Account Manager', 'Account Manager'),
+('ACCOUNT_REVIEWER', 'Account Reviewer', 'Account Reviewer'),
+('APPROVER', 'Approver', 'Approver'),
+('EXECUTIVE', 'Executive', 'Executive'),
+('EXTERNAL_AUDITOR', 'External Auditor', 'External Auditor'),
+('FINANCIAL_MANAGER', 'Financial Manager', 'Financial Manager'),
+('FINANCIAL_REVIEWER', 'Financial Reviewer', 'Financial Reviewer'),
+('INTERNAL_AUDITOR', 'Internal Auditor', 'Internal Auditor'),
+('LOCAL_ADMIN', 'Local Admin', 'Local Admin'),
+('PREPARER_RECONCILER', 'Preparer/Reconciler', 'Preparer/Reconciler'),
+('REVIEWER', 'Reviewer', 'Reviewer');
+```
+
+---
+
+## 15.3 user_roles
+
+```sql
+CREATE TABLE user_roles (
+    id BIGSERIAL PRIMARY KEY,
+    user_id VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    role_code VARCHAR(50) NOT NULL REFERENCES roles(role_code),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, role_code)
+);
+```
+
+---
+
+## 15.4 user_session
+
+Stores active role context for demo login and future SSO session mapping.
+
+```sql
+CREATE TABLE user_session (
+    id BIGSERIAL PRIMARY KEY,
+    session_id VARCHAR(150) UNIQUE NOT NULL,
+    user_id VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    active_role_code VARCHAR(50) REFERENCES roles(role_code),
+    login_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_activity_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
+);
+```
+
+---
+
+## 15.5 team
+
+```sql
+CREATE TABLE team (
+    id BIGSERIAL PRIMARY KEY,
+    team_id VARCHAR(100) UNIQUE NOT NULL,
+    team_name VARCHAR(255) NOT NULL,
+    description TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+---
+
+## 15.6 approval_matrix
+
+Used to resolve workflow assignments. For Phase 1, it can be seeded.
+
+```sql
+CREATE TABLE approval_matrix (
+    id BIGSERIAL PRIMARY KEY,
+    matrix_id VARCHAR(100) UNIQUE NOT NULL,
+    preparer_user_id VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    approver_user_id VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    reviewer_user_id VARCHAR(100) REFERENCES users(user_id),
+    team_id VARCHAR(100) REFERENCES team(team_id),
+    company_code VARCHAR(50),
+    region VARCHAR(100),
+    effective_from DATE,
+    effective_to DATE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_preparer_not_approver CHECK (preparer_user_id <> approver_user_id)
+);
+```
+
+---
+
+## 15.7 journal_file_load
+
+Stores uploaded source journal file, including its BLOB content.
+
+```sql
+CREATE TABLE journal_file_load (
+    id BIGSERIAL PRIMARY KEY,
+    file_load_id VARCHAR(100) UNIQUE NOT NULL,
+    original_file_name VARCHAR(500) NOT NULL,
+    file_extension VARCHAR(50),
+    mime_type VARCHAR(255),
+    file_size_bytes BIGINT,
+    file_hash VARCHAR(256),
+    file_content BYTEA NOT NULL,
+    source_type VARCHAR(50) NOT NULL DEFAULT 'MANUAL_UPLOAD',
+    delimiter VARCHAR(20) NOT NULL DEFAULT 'TAB',
+    expected_column_count INTEGER NOT NULL DEFAULT 27,
+    total_rows INTEGER NOT NULL DEFAULT 0,
+    valid_rows INTEGER NOT NULL DEFAULT 0,
+    invalid_rows INTEGER NOT NULL DEFAULT 0,
+    journals_created INTEGER NOT NULL DEFAULT 0,
+    status VARCHAR(50) NOT NULL,
+    error_message TEXT,
+    uploaded_by VARCHAR(100) REFERENCES users(user_id),
+    uploaded_role VARCHAR(50) REFERENCES roles(role_code),
+    uploaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    processed_at TIMESTAMP NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+---
+
+## 15.8 journal_header
+
+```sql
+CREATE TABLE journal_header (
+    id BIGSERIAL PRIMARY KEY,
+    journal_id VARCHAR(100) UNIQUE NOT NULL,
+    file_load_id VARCHAR(100) NOT NULL REFERENCES journal_file_load(file_load_id),
+
+    document_type VARCHAR(50) NOT NULL,
+    document_number VARCHAR(100) NOT NULL,
+    gl_date DATE NOT NULL,
+    journal_period VARCHAR(7) NOT NULL,
+    period_number INTEGER,
+    fiscal_year INTEGER,
+    batch_number VARCHAR(100),
+    batch_date DATE,
+    ledger_type VARCHAR(50),
+    reverse_or_void VARCHAR(50),
+
+    company_code VARCHAR(50),
+    batch_type VARCHAR(50),
+    currency VARCHAR(10),
+    source_exchange_rate NUMERIC(18, 8),
+    usd_conversion_rate NUMERIC(18, 8),
+
+    total_debit NUMERIC(18, 2) NOT NULL DEFAULT 0,
+    total_credit NUMERIC(18, 2) NOT NULL DEFAULT 0,
+    total_debit_usd NUMERIC(18, 2) NOT NULL DEFAULT 0,
+    total_credit_usd NUMERIC(18, 2) NOT NULL DEFAULT 0,
+
+    template_name VARCHAR(255) NOT NULL DEFAULT 'Generic',
+    team_id VARCHAR(100) REFERENCES team(team_id),
+    status VARCHAR(50) NOT NULL DEFAULT 'PENDING_PREPARER',
+    posting_status VARCHAR(100),
+
+    created_by VARCHAR(100) REFERENCES users(user_id),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    closed_at TIMESTAMP NULL,
+
+    UNIQUE (
+        document_type,
+        document_number,
+        gl_date,
+        period_number,
+        fiscal_year,
+        batch_number,
+        batch_date,
+        ledger_type,
+        company_code,
+        batch_type,
+        currency
+    )
+);
+```
+
+---
+
+## 15.9 journal_assignment
+
+This table controls which user acts in which role for each journal.
+
+```sql
+CREATE TABLE journal_assignment (
+    id BIGSERIAL PRIMARY KEY,
+    assignment_id VARCHAR(100) UNIQUE NOT NULL,
+    journal_id VARCHAR(100) NOT NULL REFERENCES journal_header(journal_id),
+    role_code VARCHAR(50) NOT NULL REFERENCES roles(role_code),
+    assigned_user_id VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    sequence_number INTEGER NOT NULL,
+    assignment_status VARCHAR(50) NOT NULL DEFAULT 'ASSIGNED',
+    assigned_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMP NULL,
+    completed_at TIMESTAMP NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(journal_id, role_code),
+    UNIQUE(journal_id, sequence_number)
+);
+```
+
+---
+
+## 15.10 journal_line
+
+```sql
+CREATE TABLE journal_line (
+    id BIGSERIAL PRIMARY KEY,
+    journal_line_id VARCHAR(100) UNIQUE NOT NULL,
+    journal_id VARCHAR(100) NOT NULL REFERENCES journal_header(journal_id),
+    file_load_id VARCHAR(100) NOT NULL REFERENCES journal_file_load(file_load_id),
+
+    source_row_number INTEGER NOT NULL,
+    business_unit VARCHAR(100),
+    object_account VARCHAR(100),
+    subsidiary VARCHAR(100),
+    subledger VARCHAR(100),
+    amount NUMERIC(18, 2) NOT NULL DEFAULT 0,
+    amount_usd NUMERIC(18, 2) NOT NULL DEFAULT 0,
+    explanation_1 VARCHAR(500),
+    explanation_2 VARCHAR(500),
+    je_line_number INTEGER,
+    subledger_type VARCHAR(50),
+    gl_post_status VARCHAR(50),
+    asset_number VARCHAR(100),
+    last_modified_by VARCHAR(255),
+    account_description VARCHAR(500),
+    raw_line TEXT,
+
+    is_selected BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE(journal_id, source_row_number)
+);
+```
+
+---
+
+## 15.11 journal_comment
+
+```sql
+CREATE TABLE journal_comment (
+    id BIGSERIAL PRIMARY KEY,
+    comment_id VARCHAR(100) UNIQUE NOT NULL,
+    journal_id VARCHAR(100) NOT NULL REFERENCES journal_header(journal_id),
+    comment_text TEXT NOT NULL,
+    role_code VARCHAR(50) NOT NULL REFERENCES roles(role_code),
+    created_by VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+---
+
+## 15.12 journal_document
+
+Stores supporting document metadata and file content as BLOB for Phase 1.
+
+```sql
+CREATE TABLE journal_document (
+    id BIGSERIAL PRIMARY KEY,
+    document_id VARCHAR(100) UNIQUE NOT NULL,
+    journal_id VARCHAR(100) NOT NULL REFERENCES journal_header(journal_id),
+
+    original_file_name VARCHAR(500) NOT NULL,
+    file_extension VARCHAR(50),
+    mime_type VARCHAR(255),
+    file_size_bytes BIGINT,
+    file_hash VARCHAR(256),
+    file_content BYTEA NOT NULL,
+    description TEXT,
+
+    uploaded_by VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    uploaded_role VARCHAR(50) NOT NULL REFERENCES roles(role_code),
+    uploaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+---
+
+## 15.13 journal_hyperlink
+
+```sql
+CREATE TABLE journal_hyperlink (
+    id BIGSERIAL PRIMARY KEY,
+    hyperlink_id VARCHAR(100) UNIQUE NOT NULL,
+    journal_id VARCHAR(100) NOT NULL REFERENCES journal_header(journal_id),
+    url TEXT NOT NULL,
+    display_text VARCHAR(500),
+    description TEXT,
+    added_by VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    added_role VARCHAR(50) NOT NULL REFERENCES roles(role_code),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+---
+
+## 15.14 journal_certification
+
+```sql
+CREATE TABLE journal_certification (
+    id BIGSERIAL PRIMARY KEY,
+    certification_id VARCHAR(100) UNIQUE NOT NULL,
+    journal_id VARCHAR(100) NOT NULL REFERENCES journal_header(journal_id),
+    assignment_id VARCHAR(100) REFERENCES journal_assignment(assignment_id),
+    role_code VARCHAR(50) NOT NULL REFERENCES roles(role_code),
+    action VARCHAR(50) NOT NULL,
+    certification_status VARCHAR(50) NOT NULL,
+    certification_statement TEXT,
+    comments TEXT,
+    reason_code VARCHAR(100),
+    performed_by VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    performed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+Allowed action values:
+
+```text
+CERTIFY
+REJECT
+DECERTIFY
+```
+
+---
+
+## 15.15 journal_audit_log
+
+```sql
+CREATE TABLE journal_audit_log (
+    id BIGSERIAL PRIMARY KEY,
+    audit_id VARCHAR(100) UNIQUE NOT NULL,
+    journal_id VARCHAR(100) REFERENCES journal_header(journal_id),
+    file_load_id VARCHAR(100) REFERENCES journal_file_load(file_load_id),
+    action_type VARCHAR(100) NOT NULL,
+    old_status VARCHAR(50),
+    new_status VARCHAR(50),
+    performed_by VARCHAR(100) REFERENCES users(user_id),
+    performed_role VARCHAR(50) REFERENCES roles(role_code),
+    message TEXT,
+    metadata_json JSONB,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+---
+
+## 15.16 rejection_reason_master
+
+```sql
+CREATE TABLE rejection_reason_master (
+    id BIGSERIAL PRIMARY KEY,
+    reason_code VARCHAR(100) UNIQUE NOT NULL,
+    reason_text VARCHAR(500) NOT NULL,
+    description TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+---
+
+## 15.17 currency_conversion_rate
+
+```sql
+CREATE TABLE currency_conversion_rate (
+    id BIGSERIAL PRIMARY KEY,
+    rate_id VARCHAR(100) UNIQUE NOT NULL,
+    from_currency VARCHAR(10) NOT NULL,
+    to_currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+    conversion_rate NUMERIC(18, 8) NOT NULL,
+    effective_from DATE NOT NULL,
+    effective_to DATE,
+    source_system VARCHAR(100) NOT NULL DEFAULT 'CONFIG_SEED',
+    source_file_name VARCHAR(500),
+    load_batch_id VARCHAR(100),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(from_currency, to_currency, effective_from)
+);
+```
+
+---
+
+## 15.18 currency_rate_load
+
+Future-ready table for JDE/SFTP currency feed.
+
+```sql
+CREATE TABLE currency_rate_load (
+    id BIGSERIAL PRIMARY KEY,
+    load_batch_id VARCHAR(100) UNIQUE NOT NULL,
+    source_type VARCHAR(50) NOT NULL DEFAULT 'MANUAL_SEED',
+    source_file_name VARCHAR(500),
+    file_content BYTEA,
+    total_rows INTEGER DEFAULT 0,
+    valid_rows INTEGER DEFAULT 0,
+    invalid_rows INTEGER DEFAULT 0,
+    status VARCHAR(50) NOT NULL,
+    error_message TEXT,
+    loaded_by VARCHAR(100) REFERENCES users(user_id),
+    loaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    processed_at TIMESTAMP NULL
+);
+```
+
+---
+
+## 15.19 certification_statement_config
+
+```sql
+CREATE TABLE certification_statement_config (
+    id BIGSERIAL PRIMARY KEY,
+    statement_id VARCHAR(100) UNIQUE NOT NULL,
+    role_code VARCHAR(50) NOT NULL REFERENCES roles(role_code),
+    statement_text TEXT NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    effective_from DATE,
+    effective_to DATE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+---
+
+## 15.20 app_config
+
+```sql
+CREATE TABLE app_config (
+    id BIGSERIAL PRIMARY KEY,
+    config_key VARCHAR(255) UNIQUE NOT NULL,
+    config_value TEXT NOT NULL,
+    description TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+
+---
+
+## 15.21 role_external_mapping
+
+This table maps external/JDE or enterprise-style role codes to the internal application role codes. This is needed because the incoming JDE text file or dependency setup may refer to operational role codes such as `BLPREPARER` and `BLAPPROVER`, while the application internally uses business role codes such as `PREPARER_RECONCILER` and `APPROVER`.
+
+Recommended normalization:
+
+```text
+External role code from JDE/dependency area: BLPREPARER
+Internal role code: PREPARER_RECONCILER
+
+External role code from JDE/dependency area: BLAPPROVER
+Internal role code: APPROVER
+```
+
+Note: If the upstream system uses the spelling `BLAPPOVER`, treat it as an accepted alias and normalize it to `BLAPPROVER` during load or seed setup.
+
+```sql
+CREATE TABLE role_external_mapping (
+    id BIGSERIAL PRIMARY KEY,
+    mapping_id VARCHAR(100) UNIQUE NOT NULL,
+    external_role_code VARCHAR(100) NOT NULL,
+    normalized_external_role_code VARCHAR(100) NOT NULL,
+    internal_role_code VARCHAR(50) NOT NULL REFERENCES roles(role_code),
+    source_system VARCHAR(100) NOT NULL DEFAULT 'JDE',
+    description TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(external_role_code, source_system)
+);
+```
+
+Seed values:
+
+```sql
+INSERT INTO role_external_mapping (
+    mapping_id,
+    external_role_code,
+    normalized_external_role_code,
+    internal_role_code,
+    source_system,
+    description
+) VALUES
+('REM-BLPREPARER', 'BLPREPARER', 'BLPREPARER', 'PREPARER_RECONCILER', 'JDE', 'JDE preparer role mapped to application Preparer/Reconciler role'),
+('REM-BLAPPROVER', 'BLAPPROVER', 'BLAPPROVER', 'APPROVER', 'JDE', 'JDE approver role mapped to application Approver role'),
+('REM-BLAPPOVER-ALIAS', 'BLAPPOVER', 'BLAPPROVER', 'APPROVER', 'JDE', 'Accepted typo/alias normalized to BLAPPROVER');
+```
+
+---
+
+## 15.22 jde_user_dependency_mapping
+
+This table maps who the Preparer is and who the Approver is based on the ADID relationship expected from the JDE/source data. The JDE journal text file contains the preparer ADID in the `Preparer` field. The application resolves that ADID to an application user, then finds the assigned approver using this dependency mapping.
+
+Business rules:
+
+```text
+The source journal file contains Preparer ADID.
+The application resolves Preparer ADID to users.adid.
+The dependency mapping resolves Approver ADID for that Preparer ADID.
+The application resolves Approver ADID to users.adid.
+The Preparer and Approver users must be different.
+The Preparer role code from dependency/source is BLPREPARER.
+The Approver role code from dependency/source is BLAPPROVER.
+```
+
+```sql
+CREATE TABLE jde_user_dependency_mapping (
+    id BIGSERIAL PRIMARY KEY,
+    dependency_id VARCHAR(100) UNIQUE NOT NULL,
+
+    preparer_adid VARCHAR(100) NOT NULL,
+    preparer_user_id VARCHAR(100) REFERENCES users(user_id),
+    preparer_role_code VARCHAR(100) NOT NULL DEFAULT 'BLPREPARER',
+
+    approver_adid VARCHAR(100) NOT NULL,
+    approver_user_id VARCHAR(100) REFERENCES users(user_id),
+    approver_role_code VARCHAR(100) NOT NULL DEFAULT 'BLAPPROVER',
+
+    company_code VARCHAR(50),
+    region VARCHAR(100),
+    team_id VARCHAR(100) REFERENCES team(team_id),
+    effective_from DATE,
+    effective_to DATE,
+    source_system VARCHAR(100) NOT NULL DEFAULT 'JDE',
+    source_file_name VARCHAR(500),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT chk_jde_preparer_approver_adid_diff CHECK (preparer_adid <> approver_adid),
+    CONSTRAINT chk_jde_preparer_approver_user_diff CHECK (
+        preparer_user_id IS NULL
+        OR approver_user_id IS NULL
+        OR preparer_user_id <> approver_user_id
+    )
+);
+```
+
+---
+
+## 15.23 dependency_mapping_load
+
+This is a future-ready table to track dependency mapping file loads if the dependency mapping later comes from JDE/SFTP or another upstream source. In Phase 1, dependency rows can be seeded manually.
+
+```sql
+CREATE TABLE dependency_mapping_load (
+    id BIGSERIAL PRIMARY KEY,
+    load_id VARCHAR(100) UNIQUE NOT NULL,
+    source_type VARCHAR(50) NOT NULL DEFAULT 'MANUAL_SEED',
+    source_system VARCHAR(100) NOT NULL DEFAULT 'JDE',
+    source_file_name VARCHAR(500),
+    file_content BYTEA,
+    total_rows INTEGER DEFAULT 0,
+    valid_rows INTEGER DEFAULT 0,
+    invalid_rows INTEGER DEFAULT 0,
+    status VARCHAR(50) NOT NULL,
+    error_message TEXT,
+    loaded_by VARCHAR(100) REFERENCES users(user_id),
+    loaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    processed_at TIMESTAMP NULL
+);
+```
+
+---
+
+## 16. Suggested Indexes
+
+```sql
+CREATE INDEX idx_journal_header_period ON journal_header(journal_period);
+CREATE INDEX idx_journal_header_status ON journal_header(status);
+CREATE INDEX idx_journal_header_period_status ON journal_header(journal_period, status);
+CREATE INDEX idx_journal_header_document_number ON journal_header(document_number);
+CREATE INDEX idx_journal_header_company_code ON journal_header(company_code);
+CREATE INDEX idx_journal_assignment_user_role ON journal_assignment(assigned_user_id, role_code);
+CREATE INDEX idx_journal_assignment_journal ON journal_assignment(journal_id);
+CREATE INDEX idx_journal_line_journal_id ON journal_line(journal_id);
+CREATE INDEX idx_journal_document_journal_id ON journal_document(journal_id);
+CREATE INDEX idx_journal_comment_journal_id ON journal_comment(journal_id);
+CREATE INDEX idx_journal_audit_journal_id ON journal_audit_log(journal_id);
+CREATE INDEX idx_parse_error_file_load ON journal_file_parse_error(file_load_id);
+CREATE INDEX idx_currency_rate_lookup ON currency_conversion_rate(from_currency, to_currency, effective_from, effective_to, is_active);
+CREATE INDEX idx_users_adid ON users(adid);
+CREATE INDEX idx_dependency_preparer_adid ON jde_user_dependency_mapping(preparer_adid);
+CREATE INDEX idx_dependency_approver_adid ON jde_user_dependency_mapping(approver_adid);
+CREATE INDEX idx_dependency_company_role ON jde_user_dependency_mapping(company_code, preparer_role_code, approver_role_code, is_active);
+```
+
+---
+
+## 17. Backend Clean Architecture Folder Structure
+
+```text
+backend/
+│
+├── app/
+│   ├── main.py
+│   ├── config.py
+│   ├── container.py
+│   ├── logging_config.py
+│   │
+│   ├── api/
+│   │   └── v1/
+│   │       ├── routes.py
+│   │       └── controllers/
+│   │           ├── auth_controller.py
+│   │           ├── journal_upload_controller.py
+│   │           ├── work_queue_controller.py
+│   │           ├── journal_detail_controller.py
+│   │           ├── journal_document_controller.py
+│   │           ├── certification_controller.py
+│   │           ├── admin_currency_controller.py
+│   │           └── health_controller.py
+│   │
+│   ├── domain/
+│   │   ├── entities/
+│   │   │   ├── user.py
+│   │   │   ├── role.py
+│   │   │   ├── journal_file_load.py
+│   │   │   ├── journal_header.py
+│   │   │   ├── journal_assignment.py
+│   │   │   ├── journal_line.py
+│   │   │   ├── journal_document.py
+│   │   │   ├── journal_comment.py
+│   │   │   ├── journal_hyperlink.py
+│   │   │   ├── journal_certification.py
+│   │   │   └── currency_conversion_rate.py
+│   │   │
+│   │   ├── enums/
+│   │   │   ├── role_code.py
+│   │   │   ├── journal_status.py
+│   │   │   ├── assignment_status.py
+│   │   │   ├── file_load_status.py
+│   │   │   └── certification_status.py
+│   │   │
+│   │   ├── repositories/
+│   │   │   ├── user_repository.py
+│   │   │   ├── role_repository.py
+│   │   │   ├── user_session_repository.py
+│   │   │   ├── journal_file_load_repository.py
+│   │   │   ├── journal_header_repository.py
+│   │   │   ├── journal_assignment_repository.py
+│   │   │   ├── journal_line_repository.py
+│   │   │   ├── journal_document_repository.py
+│   │   │   ├── journal_comment_repository.py
+│   │   │   ├── journal_hyperlink_repository.py
+│   │   │   ├── journal_certification_repository.py
+│   │   │   ├── journal_audit_repository.py
+│   │   │   └── currency_conversion_repository.py
+│   │   │
+│   │   └── services/
+│   │       ├── auth_service.py
+│   │       ├── active_role_service.py
+│   │       ├── file_blob_service.py
+│   │       ├── journal_parser_service.py
+│   │       ├── journal_validation_service.py
+│   │       ├── journal_assignment_service.py
+│   │       ├── journal_totals_service.py
+│   │       ├── currency_conversion_service.py
+│   │       ├── certification_workflow_service.py
+│   │       └── audit_service.py
+│   │
+│   ├── application/
+│   │   ├── dto/
+│   │   │   ├── auth_dto.py
+│   │   │   ├── active_role_dto.py
+│   │   │   ├── journal_upload_dto.py
+│   │   │   ├── work_queue_dto.py
+│   │   │   ├── journal_detail_dto.py
+│   │   │   ├── certification_dto.py
+│   │   │   ├── document_dto.py
+│   │   │   └── currency_rate_dto.py
+│   │   │
+│   │   └── use_cases/
+│   │       ├── demo_login_usecase.py
+│   │       ├── get_logged_in_user_usecase.py
+│   │       ├── switch_active_role_usecase.py
+│   │       ├── upload_journal_file_usecase.py
+│   │       ├── get_work_queue_by_period_usecase.py
+│   │       ├── get_journal_detail_usecase.py
+│   │       ├── certify_journal_usecase.py
+│   │       ├── reject_journal_usecase.py
+│   │       ├── upload_journal_document_usecase.py
+│   │       ├── download_journal_document_usecase.py
+│   │       ├── preview_journal_document_usecase.py
+│   │       ├── add_journal_comment_usecase.py
+│   │       ├── add_journal_hyperlink_usecase.py
+│   │       └── get_currency_rates_usecase.py
+│   │
+│   ├── infrastructure/
+│   │   ├── database/
+│   │   │   ├── db.py
+│   │   │   ├── base.py
+│   │   │   ├── models/
+│   │   │   └── repositories/
+│   │   │
+│   │   └── services/
+│   │       ├── demo_auth_service_impl.py
+│   │       ├── active_role_service_impl.py
+│   │       ├── postgres_blob_service_impl.py
+│   │       ├── tab_delimited_journal_parser_service_impl.py
+│   │       ├── journal_validation_service_impl.py
+│   │       ├── journal_assignment_service_impl.py
+│   │       ├── journal_totals_service_impl.py
+│   │       ├── currency_conversion_service_impl.py
+│   │       ├── certification_workflow_service_impl.py
+│   │       └── audit_service_impl.py
+│   │
+│   ├── schemas/
+│   └── utils/
+│
+├── alembic/
+├── tests/
+├── seed/
+│   ├── seed_users.sql
+│   ├── seed_roles.sql
+│   ├── seed_user_roles.sql
+│   ├── seed_approval_matrix.sql
+│   ├── seed_rejection_reasons.sql
+│   └── seed_currency_rates.sql
+├── .env.example
+├── requirements.txt
+├── Dockerfile
+└── docker-compose.yml
+```
+
+---
+
+## 18. Frontend Folder Structure
+
+The frontend should be organized by business module, not only by technical component type. Each module should own its pages, components, CSS module files, hooks, and type definitions where possible. This keeps the application maintainable as Preparer/Reconciler, Approver, Local Admin, and future roles expand.
+
+### 18.1 UI Design Principle
+
+The visual design should closely follow the provided BlackLine screenshots: compact enterprise layout, grey/white workspace, dense journal grids, left/top navigation behavior, role-aware action buttons, filter row styling, tabular data presentation, and clear certification sections.
+
+Do not hardcode styling directly inside JSX except for unavoidable dynamic style values. Keep page-level and module-level CSS in separate `.module.css` files.
+
+### 18.2 CSS Strategy
+
+Use CSS Modules for module-level and component-level styling. Next.js supports CSS Modules with the `.module.css` extension and scopes class names locally, which reduces class-name collisions across independently maintained modules.
+
+Use one global stylesheet only for design tokens, reset rules, font declarations, and base body layout. All screen-specific styling should go into module CSS files.
+
+Recommended CSS structure:
+
+```text
+frontend/
+├── app/
+│   ├── globals.css
+│   └── layout.tsx
+│
+├── styles/
+│   ├── tokens.css
+│   ├── typography.css
+│   ├── grid.css
+│   └── journal-certification-theme.css
+│
+├── modules/
+│   ├── auth/
+│   │   ├── pages/LoginPage.tsx
+│   │   ├── components/LoginForm.tsx
+│   │   └── styles/LoginPage.module.css
+│   │
+│   ├── layout/
+│   │   ├── components/AppShell.tsx
+│   │   ├── components/Header.tsx
+│   │   ├── components/UserRoleDropdown.tsx
+│   │   ├── components/Sidebar.tsx
+│   │   └── styles/Layout.module.css
+│   │
+│   ├── journals/
+│   │   ├── pages/WorkQueuePage.tsx
+│   │   ├── pages/JournalDetailPage.tsx
+│   │   ├── components/PeriodSelector.tsx
+│   │   ├── components/JournalFilterBar.tsx
+│   │   ├── components/JournalGrid.tsx
+│   │   ├── components/JournalHeaderPanel.tsx
+│   │   ├── components/JournalLineGrid.tsx
+│   │   ├── components/JournalDocumentsPanel.tsx
+│   │   ├── components/JournalCommentsPanel.tsx
+│   │   ├── components/JournalHyperlinksPanel.tsx
+│   │   ├── components/CertificationPanel.tsx
+│   │   ├── components/AuditTrailPanel.tsx
+│   │   ├── hooks/useWorkQueue.ts
+│   │   ├── hooks/useJournalLocalFilters.ts
+│   │   ├── services/journalService.ts
+│   │   ├── types/journal.types.ts
+│   │   └── styles/
+│   │       ├── WorkQueuePage.module.css
+│   │       ├── JournalDetailPage.module.css
+│   │       ├── JournalGrid.module.css
+│   │       ├── JournalFilterBar.module.css
+│   │       └── CertificationPanel.module.css
+│   │
+│   ├── documents/
+│   │   ├── components/FileUploadArea.tsx
+│   │   ├── components/DocumentList.tsx
+│   │   ├── components/FileDownloadIcon.tsx
+│   │   ├── components/FilePreviewIcon.tsx
+│   │   ├── services/documentService.ts
+│   │   ├── types/document.types.ts
+│   │   └── styles/DocumentPanel.module.css
+│   │
+│   └── admin/
+│       ├── pages/JournalUploadPage.tsx
+│       ├── pages/CurrencyRatesPage.tsx
+│       ├── components/JournalFileUpload.tsx
+│       ├── components/CurrencyRateGrid.tsx
+│       ├── services/adminCurrencyService.ts
+│       ├── types/currency.types.ts
+│       └── styles/
+│           ├── JournalUploadPage.module.css
+│           └── CurrencyRatesPage.module.css
+```
+
+### 18.3 BlackLine-Like Theme Tokens
+
+Create a shared theme file to keep the UI visually consistent. The values should be adjusted to match the provided screenshots during implementation.
+
+```css
+:root {
+  --jc-font-family: Arial, Helvetica, sans-serif;
+  --jc-page-bg: #f4f5f7;
+  --jc-panel-bg: #ffffff;
+  --jc-border: #d7dce2;
+  --jc-grid-header-bg: #eef1f5;
+  --jc-grid-row-hover: #f7f9fb;
+  --jc-text-primary: #202428;
+  --jc-text-secondary: #5f6975;
+  --jc-link: #1f5f99;
+  --jc-action-blue: #2f6f9f;
+  --jc-danger: #b42318;
+  --jc-success: #207a3c;
+  --jc-warning: #a15c00;
+  --jc-radius-sm: 2px;
+  --jc-radius-md: 4px;
+  --jc-spacing-xs: 4px;
+  --jc-spacing-sm: 8px;
+  --jc-spacing-md: 12px;
+  --jc-spacing-lg: 16px;
+}
+```
+
+### 18.4 Page-Level CSS Linking Rule
+
+Each page must import only its own page CSS module and reusable component CSS through component imports.
+
+Example:
+
+```tsx
+import styles from './WorkQueuePage.module.css';
+
+export default function WorkQueuePage() {
+  return (
+    <main id="journal-work-queue-page" className={styles.pageShell}>
+      ...
+    </main>
+  );
+}
+```
+
+### 18.5 W3C/WCAG-Aligned HTML Attribute Rules
+
+Every interactive element must have meaningful and stable attributes.
+
+Rules:
+
+```text
+Each id must be unique within the page.
+Use kebab-case for DOM id values.
+Use camelCase for React handler and variable names.
+Use meaningful name attributes for form controls.
+Every form input must have a visible label or accessible label.
+The label for attribute must match the input id.
+Use aria-describedby when helper text or error text exists.
+Use aria-invalid=true when a field has validation error.
+Use button type="button" unless the button submits a form.
+Use semantic elements: header, nav, main, section, table, button, form, label.
+Avoid div-only interactive controls.
+```
+
+Examples for stable ids and names:
+
+```tsx
+<label htmlFor="journal-period-select">Period</label>
+<select
+  id="journal-period-select"
+  name="journalPeriod"
+  aria-describedby="journal-period-help"
+>
+  <option value="07/2026">07/2026</option>
+</select>
+<span id="journal-period-help">Select a period to load journals.</span>
+
+<input
+  id="journal-filter-document-number"
+  name="documentNumberFilter"
+  type="text"
+  aria-label="Filter by document number"
+/>
+
+<button
+  id="journal-certify-button"
+  name="certifyJournalButton"
+  type="button"
+>
+  Certify
+</button>
+```
+
+### 18.6 Module Ownership Rule
+
+Each feature module owns its UI, state hooks, services, types, and CSS. Shared components should be moved to `modules/shared` only when used by two or more modules.
+
+Recommended shared module:
+
+```text
+modules/shared/
+├── components/
+│   ├── EmptyState.tsx
+│   ├── StatusBadge.tsx
+│   ├── ConfirmDialog.tsx
+│   ├── DataGridShell.tsx
+│   └── FormField.tsx
+├── styles/
+│   ├── EmptyState.module.css
+│   ├── StatusBadge.module.css
+│   └── FormField.module.css
+└── utils/
+    ├── formatDate.ts
+    ├── formatCurrency.ts
+    └── filterRows.ts
+```
+
+### 18.7 UI Filtering Component Rule
+
+The `JournalFilterBar` must not call backend APIs. It should accept the loaded period rows and filter in memory.
+
+```text
+PeriodSelector
+  -> calls backend when period changes
+
+JournalFilterBar
+  -> filters already-loaded rows in React state only
+  -> no API call
+  -> no database hit
+```
+
+```text
+frontend/
+│
+├── app/
+│   ├── layout.tsx
+│   ├── page.tsx
+│   ├── login/page.tsx
+│   ├── journals/page.tsx
+│   ├── journals/[journalId]/page.tsx
+│   ├── admin/upload-journal/page.tsx
+│   ├── admin/currency-rates/page.tsx
+│   └── no-access/page.tsx
+│
+├── components/
+│   ├── layout/
+│   │   ├── AppShell.tsx
+│   │   ├── Header.tsx
+│   │   ├── UserRoleDropdown.tsx
+│   │   └── Sidebar.tsx
+│   │
+│   ├── journals/
+│   │   ├── PeriodSelector.tsx
+│   │   ├── JournalFilterBar.tsx
+│   │   ├── JournalGrid.tsx
+│   │   ├── JournalHeaderPanel.tsx
+│   │   ├── JournalLineGrid.tsx
+│   │   ├── JournalCommentsPanel.tsx
+│   │   ├── JournalDocumentsPanel.tsx
+│   │   ├── JournalHyperlinksPanel.tsx
+│   │   ├── CertificationPanel.tsx
+│   │   └── AuditTrailPanel.tsx
+│   │
+│   ├── upload/
+│   │   ├── JournalFileUpload.tsx
+│   │   └── SupportingDocumentUpload.tsx
+│   │
+│   ├── admin/
+│   │   └── CurrencyRateGrid.tsx
+│   │
+│   └── common/
+│       ├── DataGrid.tsx
+│       ├── StatusBadge.tsx
+│       ├── EmptyState.tsx
+│       ├── ConfirmDialog.tsx
+│       ├── FileDownloadIcon.tsx
+│       └── FilePreviewIcon.tsx
+│
+├── services/
+│   ├── apiClient.ts
+│   ├── authService.ts
+│   ├── roleService.ts
+│   ├── workQueueService.ts
+│   ├── journalService.ts
+│   ├── journalDocumentService.ts
+│   └── adminCurrencyService.ts
+│
+├── hooks/
+│   ├── useAuth.ts
+│   ├── useActiveRole.ts
+│   ├── useWorkQueue.ts
+│   ├── useJournalDetail.ts
+│   ├── useJournalDocuments.ts
+│   └── useCurrencyRates.ts
+│
+├── types/
+│   ├── auth.ts
+│   ├── role.ts
+│   ├── journal.ts
+│   ├── document.ts
+│   ├── certification.ts
+│   └── currency.ts
+│
+└── package.json
+```
+
+---
+
+## 19. API Endpoint Design
+
+### 19.1 Auth and Active Role
+
+```http
+POST /api/v1/auth/login
+GET  /api/v1/auth/me
+POST /api/v1/auth/switch-role
+POST /api/v1/auth/logout
+```
+
+### 19.2 Journal File Upload
+
+```http
+POST /api/v1/journal-files/upload
+POST /api/v1/journal-files/{fileLoadId}/process
+GET  /api/v1/journal-files/{fileLoadId}
+```
+
+### 19.3 Role-Based Work Queue
+
+Use one common endpoint instead of separate Preparer and Approver APIs.
+
+```http
+GET /api/v1/journals/work-queue?period=07/2026
+```
+
+The backend derives role from active session role.
+
+Secondary filters are not sent to this API in Phase 1. The API is called only when the selected period changes, or when the page is initially loaded with a default period.
+
+```http
+GET /api/v1/journals/work-queue?period=07/2026
+```
+
+The response must include all grid fields needed for UI-side filtering, including journal ID, document number, batch number, company code, currency, status, preparer, approver, template, and team.
+
+### 19.4 Journal Detail
+
+```http
+GET /api/v1/journals/{journalId}
+GET /api/v1/journals/{journalId}/lines
+GET /api/v1/journals/{journalId}/audit
+GET /api/v1/journals/{journalId}/certifications
+```
+
+### 19.5 Certification
+
+```http
+POST /api/v1/journals/{journalId}/certify
+POST /api/v1/journals/{journalId}/reject
+POST /api/v1/journals/{journalId}/decertify
+```
+
+The action allowed depends on active role and assignment.
+
+### 19.6 Supporting Documents
+
+```http
+POST /api/v1/journals/{journalId}/documents
+GET  /api/v1/journals/{journalId}/documents
+GET  /api/v1/journals/{journalId}/documents/{documentId}/download
+GET  /api/v1/journals/{journalId}/documents/{documentId}/preview
+```
+
+### 19.7 Comments and Hyperlinks
+
+```http
+POST /api/v1/journals/{journalId}/comments
+GET  /api/v1/journals/{journalId}/comments
+
+POST /api/v1/journals/{journalId}/hyperlinks
+GET  /api/v1/journals/{journalId}/hyperlinks
+```
+
+### 19.8 Admin Currency
+
+```http
+GET /api/v1/admin/currency-rates
+GET /api/v1/admin/currency-rates/{rateId}
+```
+
+No create/update/delete for Phase 1.
+
+---
+
+## 20. Role-Based Navigation
+
+### Active Role: Preparer/Reconciler
+
+```text
+Journals
+My Work Queue
+```
+
+### Active Role: Approver
+
+```text
+Journals
+Pending Approvals
+```
+
+### Active Role: Local Admin
+
+```text
+Upload Journal
+Currency Conversion
+```
+
+---
+
+## 21. Seed Data Plan
+
+### 21.1 Users
+
+```text
+user_preparer_approver
+user_approver_reviewer
+user_admin
+```
+
+### 21.2 User Roles
+
+```text
+user_preparer_approver:
+- PREPARER_RECONCILER
+- APPROVER
+
+user_approver_reviewer:
+- APPROVER
+- REVIEWER
+
+user_admin:
+- LOCAL_ADMIN
+```
+
+### 21.3 Approval Matrix
+
+Seed at least one valid mapping:
+
+```text
+preparer_user = user_preparer_approver
+approver_user = user_approver_reviewer
+```
+
+Do not seed a matrix where preparer and approver are the same user.
+
+### 21.4 Currency Rates
+
+```text
+AUD -> USD = 0.65
+USD -> USD = 1.00
+EUR -> USD = 1.09
+INR -> USD = 0.012
+```
+
+### 21.5 Rejection Reasons
+
+```text
+MISSING_SUPPORT
+INCORRECT_AMOUNT
+INCORRECT_ACCOUNT
+INSUFFICIENT_COMMENT
+OTHER
+```
+
+---
+
+## 22. MVP Build Sequence
+
+### Sprint 1: Foundation
+
+```text
+Create FastAPI project
+Create Next.js project
+Create PostgreSQL schema
+Create Alembic migrations
+Seed users, roles, user roles, approval matrix, rejection reasons, currency rates
+Build demo login
+Build role switcher
+```
+
+### Sprint 2: Journal Upload and Parsing
+
+```text
+Create journal upload API
+Store journal source file as BYTEA
+Implement tab-delimited parser
+Validate 27 columns
+Create file load record
+Create journal header records
+Create journal line records
+Calculate debit/credit totals
+Apply currency conversion
+Create journal assignments
+Validate preparer and approver are different users
+```
+
+### Sprint 3: Work Queue and Filtering
+
+```text
+Build period dropdown as mandatory top filter
+Build secondary grid filters below period
+Implement more-than-2-characters auto-filter
+Implement 500 ms debounce
+Build role-based work queue API
+Show no records found message
+```
+
+### Sprint 4: Preparer/Reconciler Detail and Certification
+
+```text
+Build journal detail page
+Show header and line grid
+Add comments
+Add document upload/list/download/preview
+Add hyperlinks
+Implement Preparer/Reconciler certify
+Move journal to PENDING_APPROVER
+```
+
+### Sprint 5: Approver Detail and Certification
+
+```text
+Build Approver view using same detail page
+Show preparer evidence
+Implement Approver certify
+Implement Approver reject with reason dropdown
+Update audit trail
+Close journal if certified
+Return journal to preparer queue if rejected
+```
+
+### Sprint 6: Admin Currency View
+
+```text
+Build admin currency rate grid
+Add filter and sort
+Keep grid immutable
+```
+
+---
+
+## 23. Key Implementation Rules
+
+1. Journal source file parser must use tab delimiter `\t`.
+2. Source journal parser must expect exactly 27 fields.
+3. One user can have multiple roles.
+4. User must choose active role from top-right dropdown.
+5. Dropdown must show only roles assigned to the logged-in user.
+6. Same user cannot be Preparer/Reconciler and Approver for the same journal.
+7. Period `MM/YYYY` is the primary mandatory top filter.
+8. Period filter exists mainly for performance and fast UI rendering.
+9. Secondary filters appear below the period filter and above the grid.
+10. Secondary auto-filter triggers only when input length is more than 2 characters.
+11. Use 500 ms debounce for secondary filters.
+12. Supporting document upload should allow any file type.
+13. Uploaded document content should be stored as PostgreSQL BYTEA in Phase 1.
+14. Document download icon should trigger direct download.
+15. Document preview icon should open a new tab.
+16. If preview is unavailable, user should download the file.
+17. Admin currency grid must be immutable in Phase 1.
+18. Email notifications are not required in Phase 1.
+19. SSO is not required in Phase 1.
+20. Full user management screen is not required in Phase 1.
+21. JDE text file Preparer field must be treated as Preparer ADID for assignment resolution.
+22. Preparer ADID must resolve to `users.adid`.
+23. Approver must be resolved from dependency mapping using Preparer ADID.
+24. External role code `BLPREPARER` maps to internal role `PREPARER_RECONCILER`.
+25. External role code `BLAPPROVER` maps to internal role `APPROVER`.
+26. If upstream sends `BLAPPOVER`, normalize it to `BLAPPROVER`.
+27. Admin dependency mapping screen must be viewable by `LOCAL_ADMIN`.
+28. Dependency mapping screen filters must be UI-only and must not hit the database.
+29. Admin file upload must be a two-step process: Upload first, Parse second.
+30. Parse must be all-or-nothing. If any row fails validation, no journal data should be committed.
+31. `PARSE_FAILED` must not create journal headers, lines, or assignments.
+32. Use explicit transaction handling: flush first, commit only if flush succeeds, rollback on any validation or database failure.
+33. Admin must receive notifications for Parsing, Parse Success, and Parse Failed.
+34. Future SFTP/S3/JDE integrations should be added through new infrastructure implementations without changing core workflow logic.
+
+---
+
+## 24. Final Phase 1 Target Flow
+
+```text
+Local Admin logs in
+   |
+   v
+Local Admin selects active role = Local Admin
+   |
+   v
+Local Admin uploads journal text file manually
+   |
+   v
+System stores source file as BYTEA
+   |
+   v
+System parses tab-delimited file
+   |
+   v
+System creates journal headers and lines
+   |
+   v
+System creates Preparer/Reconciler and Approver assignments
+   |
+   v
+System validates assigned users are different
+   |
+   v
+Journal status = PENDING_PREPARER
+   |
+   v
+User logs in and selects Preparer/Reconciler role
+   |
+   v
+User selects Period MM/YYYY top filter
+   |
+   v
+User opens available journal
+   |
+   v
+User uploads supporting documents, adds comments/hyperlinks
+   |
+   v
+User certifies
+   |
+   v
+Journal moves to assigned Approver
+   |
+   v
+Approver selects active role = Approver
+   |
+   v
+Approver selects Period MM/YYYY top filter
+   |
+   v
+Approver opens available journal
+   |
+   v
+Approver reviews details and documents
+   |
+   v
+Approver certifies or rejects
+   |
+   v
+System captures certification and audit trail
+   |
+   v
+Journal is closed or returned to Preparer/Reconciler
+```
+
+
+
+---
+
+## 26. Explicit Screen Inclusion: Admin Upload, Role Dashboard Grid, Cert Link, View Mode, and Decertify Link
+
+This section clarifies the screen flow that must be implemented for Phase 1 based on the screenshot-style BlackLine grid behavior. The screenshots show a landing/dashboard style grid where a user clicks a certification action from the row, moves into the detail/certification screen, and after certification the same item becomes view-oriented with decertification and audit visibility.
+
+### 26.1 Admin Journal Upload Screen
+
+The journal source file upload is performed by the user working under the `LOCAL_ADMIN` active role.
+
+Flow:
+
+```text
+Local Admin logs in
+        |
+        v
+Local Admin selects active role = Local Admin
+        |
+        v
+Local Admin opens Upload Journal screen
+        |
+        v
+Local Admin uploads tab-delimited journal source file
+        |
+        v
+System parses the file and creates journal header/line records
+        |
+        v
+System creates Preparer/Reconciler and Approver assignments
+        |
+        v
+Journal status = PENDING_PREPARER
+        |
+        v
+Journal appears in Preparer/Reconciler dashboard grid for the selected period
+```
+
+Admin upload screen components:
+
+```text
+Page title: Upload Journal File
+File input control
+Selected file name
+Upload button
+Processing status panel
+Total rows
+Valid rows
+Invalid rows
+Journals created
+Error summary if parsing fails
+```
+
+Only the journal source file upload is restricted to Admin. Supporting document upload remains available inside the journal detail screen for Preparer/Reconciler and Approver.
+
+---
+
+### 26.2 Role-Based Dashboard Grid After Role Switch
+
+When a user switches active role from the top-right user dropdown, the application should route the user to a role-based dashboard/work queue grid.
+
+Example:
+
+```text
+User logs in
+        |
+        v
+User opens top-right role dropdown
+        |
+        v
+User selects Preparer/Reconciler
+        |
+        v
+System shows Preparer/Reconciler dashboard grid
+```
+
+The dashboard grid follows the screenshot-style layout:
+
+```text
+Header area
+Period top filter
+Dashboard/work queue grid
+Grid row action link: Cert / View / Decertify depending on state
+```
+
+The dashboard grid is not a separate loosely connected page. It is the main entry point for the selected role.
+
+---
+
+### 26.3 Preparer/Reconciler Dashboard Grid
+
+Accessible when active role is:
+
+```text
+PREPARER_RECONCILER
+```
+
+Top filter:
+
+```text
+Period * [MM/YYYY]
+```
+
+The Period filter triggers the only backend call for loading the grid data.
+
+Grid columns:
+
+```text
+Action
+Journal ID
+Document Number
+Batch Number
+GL Date
+Period
+Company Code
+Currency
+Total Debit
+Total Credit
+Status
+Template
+Team
+Preparer/Reconciler
+Approver
+Created At
+```
+
+Allowed row actions for Preparer/Reconciler:
+
+```text
+PENDING_PREPARER       -> Cert
+PREPARER_IN_PROGRESS   -> Cert
+REJECTED               -> Cert
+PENDING_APPROVER       -> View, Decertify
+CLOSED                 -> View
+DECERTIFIED            -> Cert
+```
+
+For Phase 1, the important behavior is:
+
+```text
+Before certification: show Cert link
+After preparer certification and send to approval: show View mode and Decertify link
+```
+
+The `Cert` link opens the journal detail screen in editable certification mode.
+
+The `View` link opens the journal detail screen in read-only view mode.
+
+The `Decertify` link allows the user to reverse their preparer certification if the journal is still pending with the Approver, subject to business rules.
+
+---
+
+### 26.4 Preparer/Reconciler Cert Mode
+
+When the Preparer/Reconciler clicks `Cert`, open the journal detail screen in certification mode.
+
+Editable sections:
+
+```text
+Comments
+Supporting Documents
+Hyperlinks
+Certification confirmation
+```
+
+Read-only sections:
+
+```text
+Journal header fields
+Journal line grid
+Calculated totals
+Currency conversion values
+```
+
+Buttons:
+
+```text
+Save
+Certify
+Cancel
+Back
+```
+
+On Certify:
+
+```text
+Insert Preparer/Reconciler certification record
+Mark Preparer/Reconciler assignment as COMPLETED
+Update journal status to PENDING_APPROVER
+Write audit log
+Return user to Preparer/Reconciler dashboard grid
+Grid row now shows View and Decertify instead of Cert
+```
+
+---
+
+### 26.5 Preparer/Reconciler View Mode After Certification
+
+After the Preparer/Reconciler certifies the journal and sends it for approval, the same journal should no longer open in edit/cert mode for that user by default.
+
+Dashboard row behavior:
+
+```text
+Status = PENDING_APPROVER
+Action = View
+Secondary Action = Decertify
+```
+
+View mode screen behavior:
+
+```text
+Header section: read-only
+Line grid: read-only
+Comments: read-only for existing comments, optional add comment if allowed
+Documents: downloadable/viewable
+Hyperlinks: clickable
+Certification details: visible
+Audit trail: visible
+```
+
+Buttons/links:
+
+```text
+Back
+Decertify
+```
+
+Recommended Phase 1 decertify rule:
+
+```text
+Preparer/Reconciler can decertify only when the journal status is PENDING_APPROVER and Approver has not certified yet.
+```
+
+On Decertify:
+
+```text
+Insert decertification record
+Mark previous Preparer/Reconciler certification as decertified logically through a new certification action
+Reset Preparer/Reconciler assignment to ASSIGNED or IN_PROGRESS
+Reset Approver assignment to ASSIGNED but not actionable
+Update journal status to PENDING_PREPARER or DECERTIFIED based on final business preference
+Write audit log
+Return journal to Cert mode in Preparer/Reconciler dashboard grid
+```
+
+Recommended Phase 1 status after decertify:
+
+```text
+PENDING_PREPARER
+```
+
+This makes the journal available again for Preparer/Reconciler correction and recertification.
+
+---
+
+### 26.6 Approver Dashboard Grid
+
+Accessible when active role is:
+
+```text
+APPROVER
+```
+
+Top filter:
+
+```text
+Period * [MM/YYYY]
+```
+
+Grid columns:
+
+```text
+Action
+Journal ID
+Document Number
+Batch Number
+GL Date
+Period
+Company Code
+Currency
+Total Debit
+Total Credit
+Status
+Template
+Team
+Preparer/Reconciler
+Approver
+Created At
+```
+
+Allowed row actions for Approver:
+
+```text
+PENDING_APPROVER       -> Cert
+APPROVER_IN_PROGRESS   -> Cert
+CLOSED                 -> View, Decertify if configured for Phase 1
+REJECTED               -> View
+```
+
+For Phase 1, the core approver behavior is:
+
+```text
+Pending approval journals show Cert link.
+Rejected or closed journals show View link.
+```
+
+Approver Decertify can be added in Phase 1 only if the business wants to test post-approval reversal. Otherwise, keep the database and API ready, but hide the action using configuration.
+
+---
+
+### 26.7 Approver Cert Mode
+
+When Approver clicks `Cert`, open the same journal detail page but in Approver certification mode.
+
+Approver can view:
+
+```text
+Header details
+Line details
+Preparer/Reconciler comments
+Preparer/Reconciler supporting documents
+Preparer/Reconciler hyperlinks
+Preparer/Reconciler certification details
+Audit trail
+```
+
+Approver can add:
+
+```text
+Approver comment
+Approver supporting document
+Approver hyperlink
+```
+
+Buttons:
+
+```text
+Certify
+Reject
+Back
+```
+
+On Approver Certify:
+
+```text
+Insert Approver certification record
+Mark Approver assignment as COMPLETED
+Update journal status to CLOSED
+Write audit log
+Return user to Approver dashboard grid
+Grid row changes to View mode
+```
+
+On Reject:
+
+```text
+Reason is mandatory
+Comment is mandatory if reason = OTHER
+Insert rejection certification record
+Mark Approver assignment as REJECTED
+Set journal status = REJECTED
+Reopen Preparer/Reconciler assignment
+Write audit log
+Journal appears again in Preparer/Reconciler dashboard grid for the same period
+```
+
+---
+
+### 26.8 Dashboard Grid Action Mapping
+
+The UI should use a clear action resolver rather than scattering button logic across pages.
+
+Action resolver input:
+
+```text
+activeRole
+journalStatus
+assignmentStatus
+loggedInUserId
+journalAssignments
+featureFlags
+```
+
+Action resolver output:
+
+```text
+Primary action: Cert or View
+Secondary actions: Decertify, Reject where applicable
+Mode: CERT_MODE or VIEW_MODE
+```
+
+Recommended action mapping:
+
+```text
+PREPARER_RECONCILER + PENDING_PREPARER     -> Cert
+PREPARER_RECONCILER + REJECTED             -> Cert
+PREPARER_RECONCILER + PENDING_APPROVER     -> View + Decertify
+PREPARER_RECONCILER + CLOSED               -> View
+APPROVER + PENDING_APPROVER                -> Cert
+APPROVER + CLOSED                          -> View
+LOCAL_ADMIN                                -> No journal certification actions
+```
+
+---
+
+### 26.9 Additional API Endpoints for Dashboard Actions
+
+Existing endpoint remains:
+
+```http
+GET /api/v1/journals/work-queue?period=07/2026
+```
+
+Add or explicitly support decertify:
+
+```http
+POST /api/v1/journals/{journalId}/decertify
+```
+
+Request example:
+
+```json
+{
+  "reason_code": "PREPARER_REVISION_REQUIRED",
+  "comments": "Decertified to update supporting document."
+}
+```
+
+Response example:
+
+```json
+{
+  "journal_id": "JRN001",
+  "status": "PENDING_PREPARER",
+  "message": "Journal decertified successfully."
+}
+```
+
+---
+
+### 26.10 Additional UI Components to Include
+
+Add these components to the frontend module structure:
+
+```text
+modules/journals/components/RoleDashboardGrid.tsx
+modules/journals/components/JournalActionLink.tsx
+modules/journals/components/JournalActionResolver.ts
+modules/journals/components/DecertifyDialog.tsx
+modules/journals/styles/RoleDashboardGrid.module.css
+modules/journals/styles/JournalActionLink.module.css
+modules/journals/styles/DecertifyDialog.module.css
+```
+
+`JournalActionLink` should render the row-level action links such as:
+
+```text
+Cert
+View
+Decertify
+```
+
+`DecertifyDialog` should capture:
+
+```text
+Reason
+Comments
+Confirmation
+```
+
+---
+
+### 26.11 Update to Final Phase 1 Flow
+
+The final Phase 1 flow should be understood as:
+
+```text
+Local Admin uploads journal file
+        |
+        v
+System creates journals and assignments
+        |
+        v
+Preparer/Reconciler selects active role
+        |
+        v
+Preparer/Reconciler dashboard grid loads by period
+        |
+        v
+Preparer/Reconciler clicks Cert link
+        |
+        v
+Preparer/Reconciler certifies journal
+        |
+        v
+Journal moves to Approver queue
+        |
+        v
+Preparer/Reconciler grid now shows View and Decertify
+        |
+        v
+Approver selects active role
+        |
+        v
+Approver dashboard grid loads by period
+        |
+        v
+Approver clicks Cert link
+        |
+        v
+Approver certifies or rejects
+        |
+        v
+Journal closes or returns to Preparer/Reconciler queue
+```
+
+
+---
+
+## 27. Explicit Screen Inclusion: Admin Dependency Mapping Screen
+
+The Admin module must include a separate dependency mapping screen. This is the screen where the Admin can view how ADIDs and role codes determine the workflow assignment.
+
+### 27.1 Purpose
+
+```text
+Show which Preparer ADID maps to which Approver ADID.
+Show which application users are resolved from those ADIDs.
+Show BLPREPARER and BLAPPROVER relationship.
+Help validate why a journal moved to a specific Preparer and Approver.
+```
+
+### 27.2 Admin Navigation
+
+When active role is `LOCAL_ADMIN`, navigation should include:
+
+```text
+Upload Journal
+Currency Conversion
+Dependency Mapping
+```
+
+### 27.3 Dependency Mapping Page Components
+
+Add these frontend components:
+
+```text
+modules/admin/pages/DependencyMappingPage.tsx
+modules/admin/components/DependencyMappingGrid.tsx
+modules/admin/components/DependencyMappingFilterBar.tsx
+modules/admin/services/dependencyMappingService.ts
+modules/admin/types/dependencyMapping.types.ts
+modules/admin/styles/DependencyMappingPage.module.css
+modules/admin/styles/DependencyMappingGrid.module.css
+modules/admin/styles/DependencyMappingFilterBar.module.css
+```
+
+### 27.4 UI-Only Filter Rule
+
+The dependency mapping grid follows the same client-side filter rule as the journal grid.
+
+```text
+Backend is called once when the screen loads.
+Rows are stored in React state.
+All filters below the header are applied in the UI only.
+No database hit happens when the Admin types in the filter boxes.
+Filtering starts only after more than 2 characters are entered.
+```
+
+### 27.5 Required DOM ids and names
+
+Examples:
+
+```tsx
+<input
+  id="dependency-filter-preparer-adid"
+  name="preparerAdidFilter"
+  type="text"
+  aria-label="Filter by preparer ADID"
+/>
+
+<input
+  id="dependency-filter-approver-adid"
+  name="approverAdidFilter"
+  type="text"
+  aria-label="Filter by approver ADID"
+/>
+
+<table id="dependency-mapping-grid" aria-label="Dependency mapping grid">
+  ...
+</table>
+```
+
+
+---
+
+## 28. Admin Upload and Parse Transaction Rules
+
+This section defines the mandatory transaction behavior when Local Admin uploads and parses the JDE journal file.
+
+### 28.1 Two-Step Upload and Parse Lifecycle
+
+The Admin upload flow must be implemented as two separate actions:
+
+```text
+Step 1: Upload File
+Step 2: Parse File
+```
+
+Upload must only store the file and metadata. It must not create journal headers, journal lines, assignments, certifications, or audit records related to parsed journal data.
+
+```text
+Local Admin uploads JDE file
+        |
+        v
+System stores file_content in journal_file_load
+        |
+        v
+journal_file_load.status = UPLOADED
+        |
+        v
+Admin clicks Parse
+        |
+        v
+Parser validates complete file
+        |
+        v
+If all validations pass, database transaction creates journal records
+        |
+        v
+If any validation fails, rollback and do not populate journal data
+```
+
+### 28.2 File Load Status Values
+
+The file load status should support these values:
+
+```text
+UPLOADED
+PARSING
+PARSED_SUCCESSFULLY
+PARSE_FAILED
+FAILED
+```
+
+Do not use `PARSE_FAILED` for Phase 1 journal creation because partial database population is not allowed.
+
+If row-level errors occur, the final status should be:
+
+```text
+PARSE_FAILED
+```
+
+Reason:
+
+```text
+If the file has any parse or validation error, no journal header, journal line, or journal assignment data should be committed.
+```
+
+### 28.3 All-or-Nothing Parse Rule
+
+Parsing must follow an all-or-nothing rule.
+
+```text
+If all rows are valid:
+    Commit all journal headers, journal lines, assignments, totals, and audit logs.
+
+If any row is invalid:
+    Roll back the full transaction.
+    Do not insert or update journal header data.
+    Do not insert or update journal line data.
+    Do not insert or update journal assignment data.
+    Store parse errors against the file load.
+    Notify the user that parse failed.
+```
+
+This avoids partial journals appearing in Preparer/Reconciler or Approver queues.
+
+### 28.4 Validation Must Happen Before Database Write
+
+The parser should perform these validations before writing business journal data:
+
+```text
+Validate file can be decoded.
+Validate delimiter is tab.
+Validate each row has exactly 27 columns.
+Validate required fields are present.
+Validate Amount is numeric.
+Validate GLDate and BatchDate are valid dates.
+Validate Preparer ADID exists in users.adid.
+Validate dependency mapping exists for Preparer ADID.
+Validate Approver ADID exists in users.adid.
+Validate Preparer user and Approver user are different.
+Validate currency conversion rate exists for the journal currency and period.
+Validate duplicate journal grouping does not conflict with existing data.
+```
+
+Only after these validations pass should the application start creating journal headers, journal lines, assignments, totals, and audit logs.
+
+### 28.5 Transaction Commit Rule
+
+Database writes during parse must be wrapped in one explicit transaction.
+
+Required rule:
+
+```text
+Flush first.
+If flush succeeds, commit.
+If flush fails, rollback.
+If any exception occurs, rollback.
+```
+
+Recommended SQLAlchemy pattern:
+
+```python
+async def parse_journal_file(file_load_id: str, current_user: CurrentUser):
+    async with session.begin():
+        try:
+            file_load = await file_load_repository.find_by_id(file_load_id)
+            file_load.status = FileLoadStatus.PARSING
+            await session.flush()
+
+            validation_result = parser.validate(file_load.file_content)
+
+            if validation_result.has_errors:
+                file_load.status = FileLoadStatus.PARSE_FAILED
+                file_load.error_message = validation_result.error_summary
+                await parse_error_repository.save_all(validation_result.errors)
+                await session.flush()
+                raise ParseValidationException(validation_result.error_summary)
+
+            journals = parser.to_journals(validation_result.rows)
+
+            await journal_header_repository.save_all(journals.headers)
+            await journal_line_repository.save_all(journals.lines)
+            await journal_assignment_repository.save_all(journals.assignments)
+            await audit_repository.save_all(journals.audit_logs)
+
+            file_load.status = FileLoadStatus.PARSED_SUCCESSFULLY
+            file_load.valid_rows = validation_result.valid_rows
+            file_load.invalid_rows = 0
+            file_load.journals_created = len(journals.headers)
+
+            await session.flush()
+            # Commit happens automatically when context exits successfully.
+
+        except Exception:
+            await session.rollback()
+            raise
+```
+
+Important implementation note:
+
+```text
+Do not commit after every row.
+Do not commit after every journal.
+Do not commit before all headers, lines, assignments, totals, audit records, and file status updates are flushed successfully.
+```
+
+### 28.6 Parse Error Storage
+
+Because journal business data must not be populated on parse failure, store errors separately at the file-load level.
+
+Add table:
+
+```sql
+CREATE TABLE journal_file_parse_error (
+    id BIGSERIAL PRIMARY KEY,
+    parse_error_id VARCHAR(100) UNIQUE NOT NULL,
+    file_load_id VARCHAR(100) NOT NULL REFERENCES journal_file_load(file_load_id),
+    row_number INTEGER,
+    field_name VARCHAR(255),
+    error_code VARCHAR(100) NOT NULL,
+    error_message TEXT NOT NULL,
+    raw_line TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+This table allows the Admin to see exactly why parsing failed without creating partial journal records.
+
+### 28.7 Admin Notification Behavior
+
+The UI must notify the Admin during each stage.
+
+Notification states:
+
+```text
+Parsing started
+Parse successful
+Parse failed
+```
+
+Recommended UI behavior:
+
+```text
+When Admin clicks Parse:
+    Show notification: Parsing started.
+    Disable Parse button.
+    Show spinner/loading status.
+
+When parse succeeds:
+    Show success notification: Parse completed successfully.
+    Show parsed row count, journals created, and assignments created.
+    Refresh file processing grid.
+
+When parse fails:
+    Show error notification: Parse failed. No journal data was created.
+    Show error summary and row-level parse errors.
+    Re-enable Parse or Retry button.
+```
+
+### 28.8 File Processing Grid Actions
+
+The Admin upload page should include a file processing grid.
+
+Grid columns:
+
+```text
+File Name
+Uploaded By
+Uploaded At
+Status
+Total Rows
+Valid Rows
+Invalid Rows
+Journals Created
+Action
+```
+
+Action mapping:
+
+```text
+UPLOADED              -> Parse
+PARSING               -> Spinner / Disabled
+PARSED_SUCCESSFULLY   -> View Results
+PARSE_FAILED          -> View Errors, Retry Parse
+FAILED                -> View Errors
+```
+
+### 28.9 Parse API Endpoint
+
+Upload endpoint:
+
+```http
+POST /api/v1/journal-files/upload
+```
+
+Parse endpoint:
+
+```http
+POST /api/v1/journal-files/{fileLoadId}/parse
+```
+
+Parse status/result endpoint:
+
+```http
+GET /api/v1/journal-files/{fileLoadId}/parse-result
+```
+
+Parse error endpoint:
+
+```http
+GET /api/v1/journal-files/{fileLoadId}/parse-errors
+```
+
+### 28.10 Frontend Components for Parse Flow
+
+Add these components to the Admin module:
+
+```text
+modules/admin/components/FileUploadPanel.tsx
+modules/admin/components/FileProcessingGrid.tsx
+modules/admin/components/FileParseButton.tsx
+modules/admin/components/ParseResultDialog.tsx
+modules/admin/components/ParseErrorPanel.tsx
+modules/admin/components/AdminNotificationBanner.tsx
+modules/admin/styles/FileUploadPanel.module.css
+modules/admin/styles/FileProcessingGrid.module.css
+modules/admin/styles/ParseResultDialog.module.css
+modules/admin/styles/ParseErrorPanel.module.css
+modules/admin/styles/AdminNotificationBanner.module.css
+```
+
+### 28.11 Required Key Rule
+
+```text
+A parsed file must never partially populate journal data.
+```
+
+Success path:
+
+```text
+Upload -> Parse -> Validate all -> Flush all -> Commit -> Notify success
+```
+
+Failure path:
+
+```text
+Upload -> Parse -> Validation fails or flush fails -> Rollback -> Notify failure -> Show errors
+```
+
+
+---
+
+## 29. UI Branding and Labeling Rule: Do Not Display Source Product Name
+
+The UI should replicate the required enterprise journal certification experience, layout behavior, grid behavior, and workflow behavior from the provided screenshots, but it must not display the source product/application name anywhere in the user-facing UI.
+
+### 29.1 Product Name Usage Rule
+
+```text
+Do not show the source product/application name in:
+- Page titles
+- Browser tab titles
+- Header logo text
+- Sidebar navigation
+- Button labels
+- Field labels
+- Toast notifications
+- Error messages
+- Help text
+- CSS class names shown in DOM where avoidable
+- API response messages shown to users
+```
+
+### 29.2 Recommended User-Facing Application Name
+
+Use a neutral internal product name instead.
+
+Recommended examples:
+
+```text
+Journal Certification
+Journal Certification Portal
+Journal Workflow Portal
+Finance Journal Certification
+```
+
+Recommended Phase 1 UI title:
+
+```text
+Journal Certification Portal
+```
+
+### 29.3 UI Copy Examples
+
+Use these labels:
+
+```text
+Work Queue
+My Assigned Journals
+Journal Details
+Certification Details
+Supporting Documents
+Comments
+Hyperlinks
+Audit Trail
+Currency Conversion
+Dependency Mapping
+Upload Journal File
+```
+
+Do not use external product names in labels.
+
+### 29.4 Code Naming Rule
+
+Avoid using external product names in new frontend component names, CSS module names, ids, names, and API routes.
+
+Use:
+
+```text
+JournalGrid
+RoleDashboardGrid
+CertificationPanel
+JournalActionResolver
+journal-certification-theme.css is not recommended for implementation naming
+```
+
+Preferred neutral theme naming:
+
+```text
+enterprise-theme.css
+journal-theme.css
+certification-theme.css
+```
+
+### 29.5 Updated Theme File Naming
+
+Replace this earlier conceptual file name:
+
+```text
+journal-certification-theme.css
+```
+
+with:
+
+```text
+journal-certification-theme.css
+```
+
+### 29.6 Design Intent
+
+The implementation should follow the visual and interaction style observed in the screenshots:
+
+```text
+Compact enterprise layout
+Role-based dashboard grid
+Column-level filter row
+Action links such as Cert, View, and Decertify
+Journal detail sections
+Supporting document grid
+Certification details
+Audit trail
+```
+
+However, the UI must remain branded as the internal Journal Certification application.
+
+
+### 29.7 Complete Codebase Naming and Comment Rule
+
+The source product/application name must not appear anywhere in the deliverable codebase, not only in the user-facing UI.
+
+This restriction applies to:
+
+```text
+Frontend code
+Backend code
+Source code comments
+Docstrings
+README files
+Markdown documentation inside the repository
+CSS class names
+CSS file names
+CSS variables
+Component names
+Function names
+Variable names
+Database table names
+Database column names
+Seed scripts
+Migration file names
+Migration comments
+API route names
+API response messages
+Error messages
+Toast messages
+Log messages
+Test names
+Test data
+Mock data
+Environment variable names
+Docker files
+Package names
+Folder names
+Git branch names if possible
+Commit messages if they are part of formal delivery records
+```
+
+Use neutral internal terms only.
+
+Recommended neutral naming:
+
+```text
+journal-certification
+journal-workflow
+certification-portal
+enterprise-journal
+finance-journal
+work-queue
+role-dashboard
+```
+
+Avoid external product references such as:
+
+```text
+blackline
+black-line
+bl-clone
+bl-ui
+blackline-theme
+blackline-grid
+blackline-style
+```
+
+The only allowed place to refer to the source screenshots is in private requirement discussions or controlled internal requirement notes outside the shipped repository. The shipped codebase and user-visible application should use only internal naming.
+
+### 29.8 Code Review Checklist for Naming Compliance
+
+Before delivery, run a repository-wide search to ensure no external product name appears anywhere in the codebase.
+
+Recommended checks:
+
+```bash
+grep -Rni "blackline" .
+grep -Rni "black-line" .
+grep -Rni "bl-ui" .
+grep -Rni "blackline-theme" .
+```
+
+Expected result:
+
+```text
+No matches found
+```
+
+If matches are found, rename them to neutral internal terms before delivery.
+
+### 29.9 Preferred Replacement Examples
+
+Use these replacements consistently:
+
+```text
+blackline-theme.css            -> journal-certification-theme.css
+BlackLineGrid                  -> JournalGrid
+BlackLineDashboard             -> RoleDashboard
+blacklineWorkQueue             -> journalWorkQueue
+blacklineStyle                 -> enterpriseJournalStyle
+BlackLine-like UI              -> enterprise-style journal certification UI
+```
+
+### 29.10 Documentation Rule
+
+Even architecture and developer documentation that ships with the repository should avoid the external product name. Use:
+
+```text
+provided screenshots
+reference screenshots
+target enterprise workflow screenshots
+journal certification reference UI
+```
+
+Do not use external product names in repository documentation.
+
+
+---
+
+## 30. Visual Styling Requirement: Screenshot-Matched Enterprise UI
+
+The application must visually match the enterprise journal certification UI shown in the provided screenshots as closely as practical, while still avoiding any external product names in the UI, source code, comments, file names, CSS class names, variables, logs, APIs, and repository documentation.
+
+### 30.1 Styling Objective
+
+The objective is:
+
+```text
+Replicate the visual layout, spacing, typography, grid density, filter placement, action links, panel structure, and certification/detail page behavior shown in the provided reference screenshots.
+```
+
+The objective is not:
+
+```text
+Copy proprietary source CSS from another application.
+Use external product names in code or UI.
+Use external branding, logos, marks, or protected assets.
+```
+
+### 30.2 CSS Implementation Approach
+
+Create a neutral internal theme that reproduces the screenshot style.
+
+Required CSS module structure:
+
+```text
+frontend/
+├── app/
+│   └── globals.css
+├── styles/
+│   ├── journal-certification-theme.css
+│   ├── typography.css
+│   ├── grid.css
+│   ├── forms.css
+│   ├── buttons.css
+│   └── layout.css
+└── modules/
+    ├── layout/styles/Layout.module.css
+    ├── journals/styles/RoleDashboardGrid.module.css
+    ├── journals/styles/GridFilterRow.module.css
+    ├── journals/styles/JournalDetailPage.module.css
+    ├── journals/styles/CertificationPanel.module.css
+    ├── documents/styles/DocumentPanel.module.css
+    └── admin/styles/*.module.css
+```
+
+### 30.3 Global Theme Tokens
+
+Use neutral CSS variable names. Do not use external product names or abbreviations.
+
+```css
+:root {
+  --jc-font-family: Arial, Helvetica, sans-serif;
+  --jc-page-bg: #f3f4f6;
+  --jc-panel-bg: #ffffff;
+  --jc-header-bg: #ffffff;
+  --jc-border: #cfd6df;
+  --jc-border-light: #e4e8ee;
+  --jc-grid-header-bg: #edf1f5;
+  --jc-grid-filter-bg: #f8f9fb;
+  --jc-grid-row-bg: #ffffff;
+  --jc-grid-row-alt-bg: #fbfcfd;
+  --jc-grid-row-hover-bg: #eef5fb;
+  --jc-text-primary: #1f2933;
+  --jc-text-secondary: #5c6670;
+  --jc-text-muted: #7a838d;
+  --jc-link: #1d5f91;
+  --jc-link-hover: #0f4268;
+  --jc-action-blue: #2f6f9f;
+  --jc-danger: #b42318;
+  --jc-success: #207a3c;
+  --jc-warning: #995c00;
+  --jc-input-bg: #ffffff;
+  --jc-input-border: #aeb7c2;
+  --jc-input-focus: #2f6f9f;
+  --jc-radius-sm: 2px;
+  --jc-radius-md: 4px;
+  --jc-spacing-xs: 4px;
+  --jc-spacing-sm: 8px;
+  --jc-spacing-md: 12px;
+  --jc-spacing-lg: 16px;
+  --jc-grid-font-size: 12px;
+  --jc-body-font-size: 13px;
+  --jc-heading-font-size: 16px;
+}
+```
+
+These values should be adjusted during UI implementation by comparing the running application against the provided screenshots.
+
+### 30.4 Exact UI Style Matching Process
+
+During implementation, developers should perform a visual parity pass for each screen:
+
+```text
+1. Open the reference screenshot.
+2. Open the implemented screen.
+3. Compare spacing, font size, row height, header background, border color, action link color, panel width, and filter placement.
+4. Update the corresponding module CSS.
+5. Re-test responsiveness and accessibility.
+6. Repeat until the screen visually matches the reference as closely as possible.
+```
+
+Screens requiring visual parity:
+
+```text
+Login screen
+Role dashboard/work queue grid
+Column-level filter row
+Journal detail page
+Line item grid
+Supporting documents panel
+Comments panel
+Hyperlinks panel
+Certification panel
+Audit trail/certification details panel
+Admin upload grid
+Admin dependency mapping grid
+Admin currency conversion grid
+```
+
+### 30.5 Grid Styling Rule
+
+The grid must use the screenshot-style dense enterprise table layout.
+
+Required behavior:
+
+```text
+Column headers are compact.
+Each column has its own filter textbox directly under the header.
+Filter textbox width must match the column width.
+Grid row height should be compact.
+Action links appear in the first/action column.
+Cert, View, and Decertify should render as link-style actions, not large buttons.
+```
+
+Recommended CSS:
+
+```css
+.gridTable {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: var(--jc-font-family);
+  font-size: var(--jc-grid-font-size);
+  background: var(--jc-grid-row-bg);
+}
+
+.gridHeaderCell {
+  background: var(--jc-grid-header-bg);
+  border: 1px solid var(--jc-border);
+  color: var(--jc-text-primary);
+  font-weight: 600;
+  padding: 4px 6px;
+  white-space: nowrap;
+}
+
+.gridFilterCell {
+  background: var(--jc-grid-filter-bg);
+  border: 1px solid var(--jc-border-light);
+  padding: 2px 4px;
+}
+
+.gridFilterInput {
+  width: 100%;
+  box-sizing: border-box;
+  height: 22px;
+  font-size: 12px;
+  border: 1px solid var(--jc-input-border);
+  background: var(--jc-input-bg);
+  padding: 2px 4px;
+}
+
+.gridCell {
+  border: 1px solid var(--jc-border-light);
+  padding: 4px 6px;
+  color: var(--jc-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gridActionLink {
+  color: var(--jc-link);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 12px;
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+```
+
+### 30.6 Column-Level Filter Placement
+
+The filter row must be part of the table/grid, not a separate top filter panel.
+
+Correct:
+
+```text
+| Action | Journal ID | Document No | Company | Currency | Status |
+|        | [filter]   | [filter]    | [filter]| [filter] | [filter]|
+| Cert   | JRN001     | 881982      | 03501   | AUD      | Pending |
+```
+
+Incorrect:
+
+```text
+Journal ID [filter] Document No [filter] Company [filter]
+---------------------------------------------------------
+Grid starts here
+```
+
+The only filter above the grid is Period.
+
+### 30.7 Page Styling Rule
+
+Each page must link to its own module CSS file. For example:
+
+```tsx
+import styles from './RoleDashboardGrid.module.css';
+```
+
+Use semantic wrapper ids:
+
+```tsx
+<main id="journal-work-queue-page" className={styles.pageShell}>
+  <section id="journal-period-filter-section" className={styles.periodSection}>
+    ...
+  </section>
+  <section id="journal-grid-section" className={styles.gridSection}>
+    ...
+  </section>
+</main>
+```
+
+### 30.8 Visual Naming Rule
+
+Even if the style is based on the provided screenshots, CSS and component names must remain neutral.
+
+Use:
+
+```text
+journal-certification-theme.css
+RoleDashboardGrid.module.css
+JournalGrid.module.css
+GridFilterRow.module.css
+CertificationPanel.module.css
+```
+
+Do not use external product names or abbreviations in CSS files, class names, comments, or components.
+
+### 30.9 Acceptance Criteria for UI Styling
+
+A screen is considered acceptable when:
+
+```text
+Layout is visually aligned with the screenshot reference.
+Period filter appears above the grid.
+Column filters appear beneath each column header.
+Filter text boxes match column width.
+Grid density is compact and enterprise-like.
+Cert/View/Decertify render as row-level action links.
+Journal detail sections follow the same sequence as the reference screenshots.
+Supporting documents have icon + document name behavior.
+CSS is modular and page/module-owned.
+No external product name appears anywhere in UI or codebase.
+W3C id/name/label/accessibility rules are followed.
+```
+
+---
+
+## 25. Reference Notes for UI Standards
+
+- Next.js CSS Modules use the `.module.css` suffix and provide locally scoped class names, which is why module-owned CSS files are recommended for this application.
+- HTML `id` values must be unique within a document, so page and component ids should be generated or named carefully to avoid duplicate ids in repeated grid rows.
+- Form controls should provide labels or instructions so users know what information to enter.
+- The provided Word screenshots should be treated as the primary visual reference for compact grid layout, header controls, filters, supporting document sections, and certification/audit presentation.
