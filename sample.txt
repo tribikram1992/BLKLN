@@ -1,0 +1,650 @@
+# Complete Project Structure
+
+## Root Directory
+```
+blackline/
+├── backend/                          # Backend FastAPI application
+├── frontend/                         # Frontend Next.js application
+├── database/                         # Database configuration and schemas
+├── deployment/                       # Deployment configurations
+├── tests/                            # Test files
+├── doc/                              # Documentation (this folder)
+├── logs/                             # Application logs (generated at runtime)
+│   └── YYYY-MM-DD/                  # Organized by date
+│       ├── app_auth.log
+│       ├── app_parser.log
+│       ├── app_service.log
+│       ├── proxy.log
+│       └── ...
+├── .github/                          # GitHub workflows
+├── local-proxy.js                    # Local development proxy server
+├── start-dev.bat                     # Windows startup script
+├── start-dev.sh                      # Mac/Linux startup script
+├── requirements.txt                  # Python dependencies
+├── SETUP.md                          # Setup instructions
+├── README.md                         # Project README
+├── .env.local                        # Environment variables (local)
+├── .env.example.local                # Environment variables template
+└── tsconfig.json                     # TypeScript configuration
+```
+
+---
+
+## Backend Structure
+
+```
+backend/
+├── main.py                           # FastAPI application entry point
+├── settings.py                       # Application settings & configuration
+├── __init__.py
+│
+├── api/                              # API endpoints
+│   ├── v1/                           # API v1
+│   │   ├── auth.py                   # Authentication endpoints
+│   │   ├── journals.py               # Journal management endpoints
+│   │   ├── comments.py               # Comments endpoints
+│   │   ├── documents.py              # Document management endpoints
+│   │   ├── workflow.py               # Workflow/certification endpoints
+│   │   ├── currency.py               # Currency management endpoints
+│   │   ├── dashboard.py              # Dashboard data endpoints
+│   │   ├── dependencies.py           # Dependency management endpoints
+│   │   └── __init__.py
+│   └── __init__.py
+│
+├── core/                             # Core utilities
+│   ├── logging_config.py             # Logging configuration
+│   │   ├── CONFIGURED_LOG_LEVEL      # Environment-based log level
+│   │   ├── setup_logger()            # Logger setup function
+│   │   ├── DateRotatingFileHandler   # Daily log rotation
+│   │   └── Loggers class             # Module-level loggers
+│   ├── exception_handlers.py         # Global exception handlers
+│   ├── message_catalog.py            # Message templates
+│   └── __init__.py
+│
+├── domain/                           # Domain models & business logic
+│   ├── enums/
+│   │   ├── role.py                   # Role codes (PREPARER, APPROVER, etc.)
+│   │   ├── error_code.py             # Error codes
+│   │   ├── success_code.py           # Success codes
+│   │   ├── info_code.py              # Info codes
+│   │   ├── message_severity.py       # Severity levels
+│   │   └── __init__.py
+│   ├── exceptions/
+│   │   ├── application_exception.py  # Base application exception
+│   │   ├── authentication_exception.py
+│   │   ├── authorization_exception.py
+│   │   ├── business_rule_exception.py
+│   │   ├── not_found_exception.py
+│   │   ├── parse_exception.py
+│   │   ├── transaction_exception.py
+│   │   ├── validation_exception.py
+│   │   └── __init__.py
+│   └── __init__.py
+│
+├── database/                         # Database configuration
+│   ├── connection.py                 # SQLAlchemy connection setup
+│   └── __init__.py
+│
+├── models/                           # SQLAlchemy ORM models
+│   ├── base.py                       # Base model class
+│   ├── user.py                       # User model
+│   │   ├── User
+│   │   ├── Role
+│   │   └── UserRole
+│   ├── journal.py                    # Journal models
+│   │   ├── JournalHeader
+│   │   ├── JournalLine
+│   │   ├── JournalFileLoad
+│   │   ├── JournalAssignment
+│   │   └── JournalComment
+│   ├── journal_document.py           # Document models
+│   │   └── JournalDocument
+│   ├── workflow.py                   # Workflow models
+│   │   ├── JournalCertification
+│   │   ├── JournalAuditLog
+│   │   └── RejectionReasonMaster
+│   ├── currency.py                   # Currency models
+│   │   ├── CurrencyRate
+│   │   └── CurrencyRateLoad
+│   ├── dependency.py                 # Dependency models
+│   │   ├── JDEUserDependencyMapping
+│   │   └── DependencyMappingLoad
+│   ├── validation_rule.py            # Validation rules model
+│   │   └── ValidationRule
+│   └── __init__.py
+│
+├── repositories/                     # Data access layer
+│   ├── user_repository.py
+│   │   ├── UserRepository
+│   │   ├── RoleRepository
+│   │   └── UserRoleRepository
+│   ├── journal_repository.py
+│   │   ├── JournalRepository
+│   │   ├── JournalLineRepository
+│   │   └── JournalAssignmentRepository
+│   ├── journal_comment_repository.py
+│   │   └── JournalCommentRepository
+│   ├── journal_document_repository.py
+│   │   └── JournalDocumentRepository
+│   ├── workflow_repository.py
+│   │   ├── JournalCertificationRepository
+│   │   ├── JournalAuditLogRepository
+│   │   └── RejectionReasonRepository
+│   ├── currency_repository.py
+│   │   └── CurrencyRepository
+│   ├── currency_rate_repository.py
+│   │   └── CurrencyRateRepository
+│   ├── validation_rule_repository.py
+│   │   └── ValidationRuleRepository
+│   └── __init__.py
+│
+├── services/                         # Business logic layer
+│   ├── auth_service.py               # Authentication service
+│   │   ├── hash_password()
+│   │   ├── verify_password()
+│   │   ├── authenticate_user()
+│   │   ├── create_session()
+│   │   └── ...
+│   ├── journal_service.py            # Journal management service
+│   │   ├── upload_journal_file()
+│   │   ├── parse_journal_file()
+│   │   ├── list_journals()
+│   │   ├── get_journal_detail()
+│   │   └── ...
+│   ├── journal_parser_service.py     # Journal parsing service
+│   │   ├── parse()
+│   │   ├── validate()
+│   │   └── ...
+│   ├── workflow_service.py           # Workflow/certification service
+│   │   ├── certify_journal()
+│   │   ├── approve_journal()
+│   │   ├── reject_journal()
+│   │   └── ...
+│   ├── comment_service.py            # Comment service
+│   ├── document_service.py           # Document management service
+│   ├── currency_service.py           # Currency service
+│   ├── dashboard_service.py          # Dashboard data service
+│   ├── dependency_service.py         # Dependency management service
+│   └── __init__.py
+│
+├── schemas/                          # Pydantic request/response schemas
+│   ├── auth_schema.py
+│   │   ├── LoginRequest
+│   │   ├── LoginResponse
+│   │   ├── RefreshTokenRequest
+│   │   └── ...
+│   ├── common.py                     # Common schemas
+│   │   ├── APIResponse
+│   │   ├── StatusCode
+│   │   └── ...
+│   ├── response.py                   # Response schemas
+│   └── __init__.py
+│
+├── security/                         # Security & authentication
+│   ├── jwt.py                        # JWT token handling
+│   │   ├── create_access_token()
+│   │   ├── create_refresh_token()
+│   │   └── verify_token()
+│   ├── session_manager.py            # Session management
+│   │   ├── create_session()
+│   │   ├── get_session()
+│   │   ├── invalidate_session()
+│   │   └── ...
+│   ├── rbac.py                       # Role-based access control
+│   │   ├── RBACService
+│   │   ├── has_permission()
+│   │   └── PermissionCode
+│   └── __init__.py
+│
+├── utils/                            # Utility functions
+│   ├── helpers.py
+│   │   ├── IDGenerator              # ID generation utility
+│   │   ├── FileHelper               # File operations
+│   │   ├── AuditHelper              # Audit logging
+│   │   └── ...
+│   ├── correlation_id.py            # Correlation ID tracking
+│   └── __init__.py
+│
+├── scripts/                          # Utility scripts
+│   ├── setup_test_users.py           # Create test users with correct password hashes
+│   ├── encode_password.py            # Encode passwords for database
+│   └── ...
+│
+├── parsers/                          # File parsers
+│   ├── journal_parser.py             # Journal file parser
+│   └── ...
+│
+├── middleware/                       # Custom middleware
+│   └── __init__.py
+│
+└── __init__.py
+```
+
+---
+
+## Frontend Structure
+
+```
+frontend/
+├── app/                              # Next.js app directory (routing)
+│   ├── layout.tsx                    # Root layout
+│   ├── globals.css                   # Global styles
+│   │
+│   ├── login/                        # Login page
+│   │   ├── layout.tsx
+│   │   ├── page.tsx
+│   │   └── page.module.css
+│   │
+│   ├── dashboard/                    # Dashboard page
+│   │   ├── page.tsx
+│   │   ├── page.module.css
+│   │   └── components/               # Dashboard components
+│   │       ├── PreparerDashboard.tsx
+│   │       ├── PreparerDashboard.module.css
+│   │       ├── ApproverDashboard.tsx
+│   │       ├── ApproverDashboard.module.css
+│   │       ├── ReviewerDashboard.tsx
+│   │       ├── ReviewerDashboard.module.css
+│   │       ├── AdminDashboard.tsx
+│   │       ├── AdminDashboard.module.css
+│   │       ├── TodoList.tsx
+│   │       └── TodoList.module.css
+│   │
+│   ├── journals/                     # Journals section
+│   │   ├── page.tsx
+│   │   ├── layout.tsx
+│   │   ├── components/
+│   │   │   ├── JournalGrid.tsx
+│   │   │   └── JournalGrid.module.css
+│   │   ├── [id]/                     # Journal detail page (dynamic)
+│   │   │   ├── page.tsx
+│   │   │   └── page.module.css
+│   │   ├── upload/                   # Journal upload page
+│   │   │   └── page.tsx
+│   │   └── progress/                 # Journal progress page
+│   │       └── page.tsx
+│   │
+│   ├── currency/                     # Currency management
+│   │   ├── page.tsx
+│   │   ├── page.module.css
+│   │   ├── layout.tsx
+│   │   ├── settings/
+│   │   │   └── page.tsx
+│   │   └── components/
+│   │       ├── CurrencyMatrix.tsx
+│   │       └── CurrencyMatrix.module.css
+│   │
+│   ├── admin/                        # Admin section
+│   │   ├── layout.tsx
+│   │   ├── settings/                 # System settings
+│   │   │   └── page.tsx
+│   │   ├── users/                    # User management
+│   │   │   └── page.tsx
+│   │   ├── validation-rules/         # Validation rules
+│   │   │   └── page.tsx
+│   │   └── components/
+│   │       ├── DependencyMapping.tsx
+│   │       └── DependencyMapping.module.css
+│   │
+│   └── not-found.tsx                 # 404 page
+│
+├── components/                       # Reusable components
+│   ├── layout/                       # Layout components
+│   │   ├── RootLayout.tsx            # Main layout wrapper
+│   │   ├── RootLayout.module.css
+│   │   ├── Header.tsx                # Header/navbar
+│   │   ├── Header.module.css
+│   │   ├── Sidebar.tsx               # Collapsible sidebar with search
+│   │   ├── Sidebar.module.css
+│   │   ├── Footer.tsx                # Footer
+│   │   ├── Footer.module.css
+│   │   ├── UserMenu.tsx              # User menu dropdown
+│   │   ├── UserMenu.module.css
+│   │   ├── PeriodSelector.tsx        # Period/month selector
+│   │   └── PeriodSelector.module.css
+│   │
+│   ├── journal/                      # Journal-related components
+│   │   ├── JournalDetail.tsx         # Journal detail view
+│   │   ├── CommentsSection.tsx       # Comments section
+│   │   ├── DocumentsSection.tsx      # Documents section
+│   │   ├── WorkflowActions.tsx       # Workflow action buttons
+│   │   ├── JournalUpload.tsx         # File upload component
+│   │   ├── JournalGrid.tsx           # Journal grid/table
+│   │   └── index.ts                  # Barrel export
+│   │
+│   ├── grid/                         # Grid/table components
+│   │   ├── JournalGrid.tsx
+│   │   └── JournalGrid.module.css
+│   │
+│   ├── modals/                       # Modal dialogs
+│   │   ├── ApproveModal.tsx          # Approve journal modal
+│   │   ├── CertifyModal.tsx          # Certify journal modal
+│   │   ├── RejectModal.tsx           # Reject journal modal
+│   │   └── DecertifyModal.tsx        # Decertify journal modal
+│   │
+│   └── common/                       # Common components
+│       ├── LoadingSpinner.tsx
+│       ├── ErrorBoundary.tsx
+│       └── ...
+│
+├── modules/                          # Feature modules
+│   ├── journals/                     # Journal modules
+│   │   ├── JournalUpload.tsx
+│   │   ├── JournalUpload.module.css
+│   │   ├── JournalProgress.tsx
+│   │   └── JournalProgress.module.css
+│   │
+│   ├── currency/                     # Currency modules
+│   │   ├── CurrencySettings.tsx
+│   │   └── CurrencySettings.module.css
+│   │
+│   ├── admin/                        # Admin modules
+│   │   ├── SystemSettings.tsx
+│   │   ├── SystemSettings.module.css
+│   │   ├── UserManagement.tsx
+│   │   └── UserManagement.module.css
+│   │
+│   └── shared/                       # Shared modules
+│       ├── api/
+│       │   └── apiClient.ts          # API client wrapper
+│       └── notifications/
+│           ├── components/
+│           │   ├── NotificationContainer.tsx
+│           │   └── NotificationContainer.module.css
+│           ├── context/
+│           │   └── NotificationContext.tsx
+│           └── types/
+│               └── notification.types.ts
+│
+├── context/                          # React context providers
+│   └── AuthContext.tsx               # Authentication context
+│       ├── AuthProvider
+│       ├── useAuth hook
+│       ├── login()
+│       ├── logout()
+│       └── switchRole()
+│
+├── hooks/                            # Custom React hooks
+│   ├── useRoleSelector.ts            # Get active role
+│   ├── usePeriodSelector.ts          # Get selected period
+│   └── ...
+│
+├── services/                         # API service clients
+│   ├── apiClient.ts                  # Base API client (Axios)
+│   │   ├── APIClient class
+│   │   ├── get()
+│   │   ├── post()
+│   │   ├── put()
+│   │   ├── delete()
+│   │   └── postFormData()
+│   ├── authApi.ts                    # Authentication API
+│   │   ├── login()
+│   │   ├── logout()
+│   │   ├── validateSession()
+│   │   ├── switchRole()
+│   │   └── ...
+│   ├── journalApi.ts                 # Journal API
+│   │   ├── listJournals()
+│   │   ├── getJournal()
+│   │   ├── uploadJournal()
+│   │   └── ...
+│   ├── dashboardApi.ts               # Dashboard API
+│   │   ├── getMetrics()
+│   │   ├── getTodoList()
+│   │   └── ...
+│   ├── workflowApi.ts                # Workflow API
+│   │   ├── certifyJournal()
+│   │   ├── approveJournal()
+│   │   ├── rejectJournal()
+│   │   └── ...
+│   └── index.ts                      # Barrel export
+│
+├── core/                             # Core utilities
+│   └── logging.ts                    # Frontend logging utility
+│       ├── Logger class
+│       ├── debug()
+│       ├── info()
+│       ├── warn()
+│       ├── error()
+│       ├── perf()
+│       ├── Loggers factory
+│       └── PerformanceTracker class
+│
+├── styles/                           # Global styles
+│   ├── journal.module.css
+│   └── admin.module.css
+│
+├── types/                            # TypeScript type definitions
+│   └── index.ts
+│       ├── User interface
+│       ├── Session interface
+│       ├── Journal interfaces
+│       ├── ApiResponse interface
+│       └── ...
+│
+├── public/                           # Static assets
+│   ├── images/
+│   ├── icons/
+│   └── ...
+│
+├── package.json                      # NPM dependencies
+├── tsconfig.json                     # TypeScript config
+├── next.config.js                    # Next.js config
+├── next-env.d.ts                     # Next.js type definitions
+└── .env.local                        # Environment variables
+```
+
+---
+
+## Database Structure
+
+```
+database/
+├── schema/
+│   ├── 001_Initial_Schema.sql        # All tables in one file
+│   │   ├── users table
+│   │   ├── roles table
+│   │   ├── user_roles table
+│   │   ├── user_session table
+│   │   ├── team table
+│   │   ├── approval_matrix table
+│   │   ├── journal_file_load table
+│   │   ├── journal_header table
+│   │   ├── journal_line table
+│   │   ├── journal_assignment table
+│   │   ├── journal_comment table
+│   │   ├── journal_document table
+│   │   ├── journal_hyperlink table
+│   │   ├── journal_certification table
+│   │   ├── journal_audit_log table
+│   │   ├── rejection_reason_master table
+│   │   ├── currency_conversion_rate table
+│   │   ├── currency_rate_load table
+│   │   ├── certification_statement_config table
+│   │   ├── app_config table
+│   │   ├── role_external_mapping table
+│   │   ├── jde_user_dependency_mapping table
+│   │   ├── dependency_mapping_load table
+│   │   ├── validation_rules table
+│   │   └── Indexes
+│   │
+│   └── seed/                         # Initial data
+│       ├── roles.sql
+│       ├── users.sql
+│       └── ...
+│
+└── migrations/                       # (Optional) Migration scripts
+
+```
+
+---
+
+## Key Files Summary
+
+### Backend Key Files
+| File | Purpose |
+|------|---------|
+| `main.py` | FastAPI app entry point |
+| `settings.py` | Configuration from environment |
+| `core/logging_config.py` | Logging setup with daily rotation |
+| `api/v1/*.py` | REST API endpoints |
+| `services/*.py` | Business logic |
+| `repositories/*.py` | Database access |
+| `models/*.py` | SQLAlchemy ORM models |
+| `security/jwt.py` | JWT token handling |
+| `security/session_manager.py` | Session management |
+
+### Frontend Key Files
+| File | Purpose |
+|------|---------|
+| `app/layout.tsx` | Root layout wrapper |
+| `app/login/page.tsx` | Login page |
+| `app/dashboard/page.tsx` | Dashboard page |
+| `context/AuthContext.tsx` | Auth state management |
+| `components/layout/Sidebar.tsx` | Collapsible sidebar with search |
+| `core/logging.ts` | Frontend logging utility |
+| `services/apiClient.ts` | API HTTP client |
+| `services/authApi.ts` | Authentication API calls |
+| `types/index.ts` | TypeScript interfaces |
+
+---
+
+## Logging Directory Structure
+
+```
+logs/
+├── 2026-08-21/                       # Daily folders
+│   ├── app_auth.log                  # Authentication logs
+│   ├── app_service.log               # Service layer logs
+│   ├── app_parser.log                # Parser logs
+│   ├── app_api.log                   # API endpoint logs
+│   ├── app_database.log              # Database logs
+│   ├── app_repository.log            # Repository logs
+│   ├── app_workflow.log              # Workflow logs
+│   ├── app_audit.log                 # Audit logs
+│   ├── app_validation.log            # Validation logs
+│   ├── app_error.log                 # Error logs
+│   └── proxy.log                     # Proxy server logs
+│
+├── 2026-08-22/                       # Next day
+│   └── *.log
+│
+└── ...
+```
+
+---
+
+## Configuration Files
+
+```
+Root Directory:
+├── .env.local                        # Environment variables (local)
+├── .env.example.local                # Environment template
+├── tsconfig.json                     # TypeScript config
+├── requirements.txt                  # Python dependencies
+└── package.json                      # Node.js dependencies
+
+Backend:
+├── backend/settings.py               # App settings
+
+Frontend:
+├── frontend/tsconfig.json            # TypeScript config
+├── frontend/next.config.js           # Next.js config
+├── frontend/package.json             # Dependencies
+└── frontend/.env.local               # Frontend env vars
+
+Database:
+└── database/schema/001_Initial_Schema.sql
+```
+
+---
+
+## Development Ports
+
+| Service | Port | URL |
+|---------|------|-----|
+| Backend API | 8000 | http://localhost:8000 |
+| Frontend | 3000 | http://localhost:3000 |
+| Proxy (optional) | 7002 | http://localhost:7002 |
+| Database | 5432 | localhost:5432 |
+
+---
+
+## API Endpoint Structure
+
+```
+/api/v1/
+├── /auth/
+│   ├── POST /login
+│   ├── POST /logout
+│   ├── POST /refresh
+│   ├── GET /profile
+│   ├── POST /switch-role
+│   └── POST /validate-session
+├── /journals/
+│   ├── GET /
+│   ├── GET /{journal_id}
+│   ├── POST /
+│   ├── PUT /{journal_id}
+│   ├── DELETE /{journal_id}
+│   ├── POST /upload
+│   ├── POST /{file_load_id}/parse
+│   ├── POST /{journal_id}/certify
+│   ├── POST /{journal_id}/approve
+│   ├── POST /{journal_id}/reject
+│   ├── POST /{journal_id}/decertify
+│   └── GET /{journal_id}/audit
+├── /comments/
+│   ├── GET /{journal_id}
+│   ├── POST /
+│   └── DELETE /{comment_id}
+├── /documents/
+│   ├── GET /{journal_id}
+│   ├── POST /upload
+│   └── DELETE /{document_id}
+├── /workflow/
+│   ├── POST /certify
+│   ├── POST /approve
+│   └── POST /reject
+├── /currency/
+│   ├── GET /rates
+│   ├── POST /rates
+│   ├── PUT /rates/{rate_id}
+│   ├── DELETE /rates/{rate_id}
+│   ├── POST /rates/upload
+│   └── GET /convert
+├── /dashboard/
+│   ├── GET /metrics
+│   ├── GET /todo-list
+│   └── GET /company-notes
+└── /dependencies/
+    ├── GET /
+    ├── POST /upload
+    └── GET /validate
+```
+
+---
+
+## Technology Stack
+
+### Backend
+- **Framework**: FastAPI (Python)
+- **Database**: PostgreSQL
+- **ORM**: SQLAlchemy
+- **Authentication**: JWT + Session Management
+- **Logging**: Python logging with daily rotation
+- **Validation**: Pydantic
+
+### Frontend
+- **Framework**: Next.js 14 (React 18)
+- **Language**: TypeScript
+- **Styling**: CSS Modules + Ant Design
+- **HTTP Client**: Axios
+- **State Management**: React Context + AuthContext
+- **Logging**: Custom logger with performance tracking
+
+### Infrastructure
+- **Development**: Local proxy (Node.js)
+- **Source Control**: Git
+- **Database Migrations**: SQL scripts
+
