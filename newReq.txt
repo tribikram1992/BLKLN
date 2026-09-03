@@ -1,0 +1,3660 @@
+# Account Reconciliation Manual Certification, Zero-Balance System Certification, and AI Validation Architecture
+
+## Document Control
+
+| Attribute | Value |
+|---|---|
+| Document Name | Account Reconciliation Architecture and Integration Design |
+| Version | 1.0 |
+| Architecture Type | Standalone Add-On Architecture |
+| Parent Application | Journal Certification Application |
+| Primary Technologies | Next.js, React, TypeScript, FastAPI, PostgreSQL |
+| Authentication | JWT |
+| Authorization | RBAC and capability-based access |
+| UI Frameworks | Ant Design and Bootstrap |
+| AI Integration | Existing application AI provider architecture |
+| Integration Approach | Additive and backward-compatible |
+
+---
+
+## 1. Executive Summary
+
+The existing application supports manual Journal Certification by a Preparer and Approver. This architecture introduces a standalone Account Reconciliation module that can be integrated into the existing application without disrupting the current Journal Certification workflow.
+
+The enhancement introduces the following major capabilities:
+
+1. Account Reconciliation manual certification.
+2. Local Admin and System Admin account-file upload.
+3. System Admin assignment queue.
+4. Manual Preparer and Approver assignment.
+5. Preparer reconciliation-item and supporting-document management.
+6. Approver approval and rejection workflow.
+7. Zero-balance System Certification.
+8. AI-based Excel-versus-screen validation for Journal Details and Account Reconciliation Details.
+9. Full audit, RBAC, notification, and deployment integration.
+10. Reuse of the existing UI styles, fonts, CSS tokens, header, footer, folder structure, and coding standards.
+
+The module is additive. Existing Journal Certification tables, APIs, business workflows, and screens remain unchanged, except for the additive AI validation action on the Journal Details page.
+
+---
+
+## 2. Existing and New Capabilities
+
+### 2.1 Existing Capability
+
+The parent application currently supports:
+
+- Manual Journal Certification.
+- Preparer certification.
+- Approver approval and rejection.
+- Journal upload processing.
+- Journal progress screens.
+- Journal details screens.
+- Supporting documents, comments, and hyperlinks.
+- Role-based access control.
+- Capability-based authorization.
+- Audit logging.
+- Notifications.
+- Currency conversion.
+- AI functions.
+
+### 2.2 New Account Reconciliation Capability
+
+The new module supports:
+
+- Account text-file upload.
+- File parsing and row validation.
+- Reconciliation creation.
+- System Admin unassigned queue.
+- Manual Preparer and Approver assignment.
+- Preparer reconciliation processing.
+- Reconciling-item entry.
+- Supporting-document management.
+- Comments and hyperlinks.
+- Preparer certification.
+- Approver approval.
+- Approver rejection.
+- Preparer decertification and recertification.
+- Zero-balance System Certification.
+- Certification-history reporting.
+
+### 2.3 New AI Validation Capability
+
+The shared AI validation capability supports:
+
+- Journal Details validation.
+- Account Reconciliation Details validation.
+- Excel or CSV document parsing.
+- Screen-data extraction.
+- Server-side data normalization.
+- Field and row comparison.
+- Discrepancy identification.
+- Severity classification.
+- Immutable validation logging.
+
+The AI must never directly alter journal, account, reconciliation, balance, assignment, certification, or supporting-item data.
+
+---
+
+## 3. Architecture Principles
+
+The following principles are mandatory:
+
+1. No physical deletion of business records.
+2. Use `is_active`, status fields, or equivalent soft-delete controls.
+3. Certification records are immutable.
+4. Audit records are immutable.
+5. AI validation records are immutable.
+6. Business-key foreign keys must be used where consistent with the existing application.
+7. A Preparer cannot be the Approver for the same reconciliation.
+8. All mutable tables must contain `created_at` and `updated_at`.
+9. Immutable tables must contain `created_at` and must not contain `updated_at`.
+10. SQL migrations must be idempotent.
+11. Existing JWT, RBAC, active-role, and capability controls must be reused.
+12. Existing frontend and backend coding conventions must be followed.
+13. Existing Baxter branding, fonts, header, footer, CSS tokens, and component styles must be reused.
+14. System Certification must remain fully auditable.
+15. AI validation failures must not block manual certification unless a future configuration explicitly makes validation mandatory.
+
+---
+
+## 4. High-Level Architecture
+
+```text
+Local Admin / System Admin
+            |
+            | Upload Accounts text file
+            v
++-----------------------------------+
+| Account File Upload API           |
++-----------------------------------+
+            |
+            v
++-----------------------------------+
+| Account File Storage and Parser   |
++-----------------------------------+
+            |
+            v
++-----------------------------------+
+| Account Processing Engine         |
++-----------------------------------+
+            |
+       +----+--------------------+
+       |                         |
+       v                         v
+Zero/Null Balance          Non-Zero Balance or
+and No Activity?           Activity Present
+       |                         |
+       v                         v
+SYSTEM_CERTIFIED           NOT_ASSIGNED
+Terminal State             System Admin Queue
+                                 |
+                                 v
+                        Manual Assignment
+                                 |
+                                 v
+                         NOT_PREPARED
+                                 |
+                                 v
+                       Preparer Reconciliation
+                                 |
+                                 v
+                            PREPARED
+                                 |
+                        +--------+--------+
+                        |                 |
+                        v                 v
+                    APPROVED           REJECTED
+                     Terminal             |
+                                          v
+                                  Preparer Rework
+```
+
+---
+
+## 5. End-to-End Account Reconciliation Flow
+
+### 5.1 File Upload
+
+A Local Admin, Business Admin, or System Admin uploads an Accounts text file.
+
+The system performs the following actions:
+
+1. Validates the file type.
+2. Calculates the SHA-256 file hash.
+3. Stores the original file.
+4. Creates an `account_file_load` row.
+5. Starts parsing.
+6. Validates required columns.
+7. Normalizes dates, booleans, currencies, and balances.
+8. Creates one reconciliation record per valid account row.
+9. Evaluates the active Zero-Balance System Certification rule.
+10. Sends non-auto-certified accounts to the System Admin queue.
+11. Updates upload counters and processing status.
+12. Records upload and parsing audit events.
+
+### 5.2 System Admin Queue
+
+Accounts that do not qualify for System Certification are created with:
+
+```text
+status = NOT_ASSIGNED
+```
+
+These records appear in the System Admin queue.
+
+### 5.3 Manual Assignment
+
+The System Admin or another authorized administrator manually provides:
+
+- Preparer.
+- Approver.
+- Optional Reviewer.
+
+The system validates:
+
+- The selected users exist.
+- The selected users are active.
+- The selected users hold compatible roles.
+- The Preparer and Approver are different users.
+
+After successful assignment, the reconciliation moves to:
+
+```text
+NOT_PREPARED
+```
+
+### 5.4 Preparer Processing
+
+The assigned Preparer opens the Reconciliation Details screen and can:
+
+- Review account balances and account attributes.
+- Add reconciling items.
+- Add comments.
+- Upload supporting documents.
+- Add hyperlinks.
+- Run AI Excel-versus-screen validation.
+- Save progress.
+- Certify the reconciliation.
+
+After certification, the status becomes:
+
+```text
+PREPARED
+```
+
+### 5.5 Approver Processing
+
+The assigned Approver opens the same Reconciliation Details route with Approver-specific actions.
+
+The Approver can:
+
+- Review all account information.
+- Review Preparer items.
+- Review comments and supporting documents.
+- Add Approver comments and documents.
+- Run AI validation.
+- Approve the reconciliation.
+- Reject the reconciliation with a reason.
+
+Approval changes the status to:
+
+```text
+APPROVED
+```
+
+Rejection changes the status to:
+
+```text
+REJECTED
+```
+
+A rejected reconciliation returns to the Preparer for correction and recertification.
+
+---
+
+## 6. Reconciliation Status Model
+
+The Account Reconciliation module uses seven statuses.
+
+### 6.1 `NOT_ASSIGNED`
+
+The reconciliation was created by the parser but has not been assigned to a Preparer and Approver.
+
+### 6.2 `NOT_PREPARED`
+
+The reconciliation has been assigned and is waiting for the Preparer.
+
+### 6.3 `PREPARED`
+
+The Preparer certified the reconciliation. The reconciliation is waiting for the Approver.
+
+### 6.4 `APPROVED`
+
+The Approver approved the reconciliation. This is a terminal state.
+
+### 6.5 `REJECTED`
+
+The Approver rejected the reconciliation. The reconciliation returns to the Preparer.
+
+### 6.6 `DECERTIFIED`
+
+The Preparer or an authorized administrator retracted a previously prepared reconciliation. The reconciliation requires recertification.
+
+### 6.7 `SYSTEM_CERTIFIED`
+
+The reconciliation was automatically certified by the configured Zero-Balance rule. This is a terminal state.
+
+### 6.8 Transition Matrix
+
+| From | Action | Actor | To |
+|---|---|---|---|
+| File parsing | System certify | System | `SYSTEM_CERTIFIED` |
+| File parsing | Queue | System | `NOT_ASSIGNED` |
+| `NOT_ASSIGNED` | Assign | Admin | `NOT_PREPARED` |
+| `NOT_PREPARED` | Certify | Preparer | `PREPARED` |
+| `PREPARED` | Approve | Approver | `APPROVED` |
+| `PREPARED` | Reject | Approver | `REJECTED` |
+| `PREPARED` | Decertify | Preparer or authorized Admin | `DECERTIFIED` |
+| `REJECTED` | Recertify | Preparer | `PREPARED` |
+| `DECERTIFIED` | Recertify | Preparer | `PREPARED` |
+
+Terminal statuses:
+
+```text
+APPROVED
+SYSTEM_CERTIFIED
+```
+
+---
+
+## 7. Account File Architecture
+
+### 7.1 Supported Input
+
+The primary upload is a text file based on the account import template.
+
+Default configuration:
+
+```text
+File type: TXT
+Delimiter: TAB
+Expected columns: 25
+Encoding: Configurable, default UTF-8
+```
+
+Leading and trailing account-segment spaces must be handled carefully. The parser must normalize fields according to the business definition and must not unintentionally alter segment values.
+
+### 7.2 Core Account Fields
+
+The parser should support the following account attributes:
+
+- Entity Unique Identifier.
+- Account Number.
+- Key 3 through Key 10.
+- Account Description.
+- Account Reference.
+- Assignment Type.
+- Account Type.
+- Active Account flag.
+- Activity in Period flag.
+- Alternate Currency.
+- Account Currency.
+- Period End Date.
+- GL Reporting Balance.
+- GL Alternate Balance.
+- GL Account Balance.
+- Company Code.
+- Region.
+- Team.
+
+### 7.3 Parsing Workflow
+
+```text
+Persist upload
+    |
+    v
+Validate file metadata
+    |
+    v
+Split file into rows
+    |
+    v
+Validate mandatory fields
+    |
+    v
+Normalize values
+    |
+    v
+Convert balances and dates
+    |
+    v
+Evaluate zero-balance rule
+    |
+    +--> SYSTEM_CERTIFIED
+    |
+    +--> NOT_ASSIGNED
+    |
+    v
+Update load counters and audit
+```
+
+### 7.4 File Processing Statuses
+
+Recommended file-load statuses:
+
+- `PENDING`.
+- `UPLOADING`.
+- `PARSING`.
+- `PARSE_SUCCESS`.
+- `PARSE_FAILED`.
+- `QUEUED_FOR_ASSIGNMENT`.
+
+### 7.5 File Counters
+
+The file-load record should maintain:
+
+- Total rows.
+- Valid rows.
+- Invalid rows.
+- Accounts created.
+- Accounts System Certified.
+- Processing start time.
+- Processing completion time.
+- Error details.
+
+### 7.6 Idempotency
+
+One reconciliation should exist for the same natural account-period combination.
+
+Recommended natural uniqueness:
+
+```text
+entity_unique_id
+account_number
+period_end_date
+account_currency
+```
+
+Re-upload behavior must be explicitly audited. Existing immutable certification history must not be removed.
+
+---
+
+## 8. Zero-Balance System Certification
+
+### 8.1 Default Rule
+
+The default rule is:
+
+```text
+GL Account Balance is zero or null
+AND
+Activity in Period is false
+```
+
+When the rule matches:
+
+```text
+status = SYSTEM_CERTIFIED
+```
+
+### 8.2 Configuration-Driven Design
+
+The Zero-Balance rule must not be hard-coded. It should be stored in `account_zero_balance_rule` and selected through application configuration.
+
+Recommended rule attributes:
+
+- Rule code.
+- Rule name.
+- Description.
+- Require zero balance.
+- Treat null as zero.
+- Require no activity.
+- Zero tolerance.
+- Applicable assignment type.
+- Active flag.
+
+### 8.3 Evaluation Logic
+
+```python
+balance_is_zero = abs(gl_account_balance or 0) <= zero_tolerance
+activity_is_allowed = not require_no_activity or activity_in_period is False
+assignment_type_allowed = configured_type is None or assignment_type == configured_type
+
+system_certify = balance_is_zero and activity_is_allowed and assignment_type_allowed
+```
+
+### 8.4 System Certification Transaction
+
+Within the same transaction, the system must:
+
+1. Create or update the reconciliation.
+2. Set `status = SYSTEM_CERTIFIED`.
+3. Set `is_zero_balance = true`.
+4. Store the applied rule code.
+5. Set the final certification state.
+6. Set completion and closure fields.
+7. Create an immutable certification row with action `SYSTEM_CERTIFY`.
+8. Create an immutable audit record.
+9. Increment the file-level System Certified counter.
+
+### 8.5 System Certification Restrictions
+
+A `SYSTEM_CERTIFIED` reconciliation:
+
+- Does not enter the Admin assignment queue.
+- Does not require a Preparer.
+- Does not require an Approver.
+- Cannot be manually certified from the standard UI.
+- Is read-only.
+- Appears in reporting.
+- Displays a System Certified status badge.
+- Displays an immutable System Certification history row.
+
+### 8.6 Edge Cases
+
+| Scenario | Result |
+|---|---|
+| Null balance and no activity | System Certified when null is configured as zero |
+| Zero balance and no activity | System Certified |
+| Zero balance with activity | Manual queue |
+| Non-zero balance and no activity | Manual queue |
+| Rule inactive | Manual queue |
+| Unsupported assignment type | Manual queue |
+
+---
+
+## 9. Admin Upload Screen
+
+### 9.1 Route
+
+```text
+/admin/upload-accounts
+```
+
+### 9.2 Access
+
+Authorized capabilities:
+
+```text
+upload_account_file
+```
+
+Recommended roles:
+
+- Local Admin.
+- Business Admin.
+- System Admin.
+
+### 9.3 Screen Sections
+
+The screen should include:
+
+- File selector or drag-and-drop area.
+- Selected file name.
+- Upload button.
+- Processing status.
+- Total-row count.
+- Valid-row count.
+- Invalid-row count.
+- Account-created count.
+- System-Certified count.
+- Error summary.
+- Downloadable error details, if required.
+
+The screen must use the same overall application shell, typography, buttons, spacing, and result-panel style as the existing Journal Upload screen.
+
+---
+
+## 10. System Admin Queue
+
+### 10.1 Route
+
+```text
+/admin/account-recon-queue
+```
+
+### 10.2 Data Scope
+
+The queue displays:
+
+```sql
+status = 'NOT_ASSIGNED'
+```
+
+### 10.3 Default Columns
+
+- Action.
+- Account Number.
+- Entity.
+- Account Description.
+- Account Type.
+- Account Currency.
+- GL Account Balance.
+- GL Account Balance in USD.
+- Activity in Period.
+- Period.
+- Company Code.
+- Region.
+- Source File.
+- Created Date.
+
+### 10.4 Queue Actions
+
+- Assign.
+- View.
+- Bulk Assign, if enabled.
+- Export.
+- Filter.
+- Sort.
+- Column chooser.
+
+A partial database index should support the `NOT_ASSIGNED` queue for efficient retrieval.
+
+---
+
+## 11. Manual Assignment Screen
+
+### 11.1 Assignment Fields
+
+The assignment drawer or modal must contain:
+
+```text
+Preparer: required
+Approver: required
+Reviewer: optional
+```
+
+### 11.2 Validation
+
+The backend must validate:
+
+- Selected users are active.
+- Selected users are authorized for the appropriate role.
+- Preparer and Approver are not the same user.
+- The reconciliation is in an assignable status.
+- The user performing the assignment has `assign_account_recon`.
+
+### 11.3 Successful Assignment
+
+On assignment, the system must:
+
+1. Create Preparer assignment with sequence 1.
+2. Create Approver assignment with sequence 2.
+3. Optionally create Reviewer assignment with sequence 3.
+4. Update denormalized user references on the reconciliation header.
+5. Change status from `NOT_ASSIGNED` to `NOT_PREPARED`.
+6. Add an immutable assignment audit entry.
+7. Queue a notification for the Preparer.
+
+---
+
+## 12. View Reconciliations Screen
+
+### 12.1 Route
+
+```text
+/accounts/reconciliations
+```
+
+### 12.2 Purpose
+
+This screen is similar to View Journal Progress but displays account-specific data and actions.
+
+### 12.3 Default Columns
+
+- Action.
+- Status.
+- Items present.
+- Comments present.
+- Documents present.
+- Account Number.
+- Account Description.
+- Entity.
+- Account Type.
+- Account Currency.
+- GL Account Balance.
+- GL Account Balance in USD.
+- Activity in Period.
+- Preparer.
+- Approver.
+- Reviewer.
+- Final Certification State.
+- Period.
+- Company Code.
+- Region.
+
+### 12.4 Action Column Rules
+
+| Action Label | Condition |
+|---|---|
+| Assign | Admin and status is `NOT_ASSIGNED` |
+| Edit | Assigned Preparer and status is `NOT_PREPARED`, `REJECTED`, or `DECERTIFIED` |
+| Cert | Assigned Approver and status is `PREPARED` |
+| View | All other authorized read-only cases |
+
+### 12.5 Role-Based Data Scope
+
+- Preparer sees assigned Preparer reconciliations.
+- Approver sees assigned Approver reconciliations.
+- Reviewer sees authorized review records.
+- Admin roles can see all records if granted `view_all_account_recons`.
+- Internal Auditor and other read roles receive read-only access according to capabilities.
+
+---
+
+## 13. Account Reconciliation Details Screen
+
+### 13.1 Route
+
+```text
+/accounts/reconciliations/{reconciliationId}
+```
+
+### 13.2 Account Header Information
+
+The header should display:
+
+- Account Number.
+- Account Description.
+- Entity.
+- Account Type.
+- Account Currency.
+- Period.
+- GL Account Balance.
+- GL Reporting Balance.
+- GL Alternate Balance.
+- Currency-conversion rate.
+- GL Account Balance in USD.
+- Activity in Period.
+- Region.
+- Company Code.
+- Status.
+- Preparer.
+- Approver.
+- Reviewer.
+
+### 13.3 Page Sections
+
+The screen should include the following sections in a layout consistent with the Journal Details page:
+
+1. Account information.
+2. Reconciling items.
+3. Comments.
+4. Supporting documents.
+5. Hyperlinks.
+6. AI validation results.
+7. Certification statement.
+8. Certification-history navigation.
+
+### 13.4 Preparer Actions
+
+The assigned Preparer can:
+
+- Add item.
+- Edit item.
+- Soft-remove item.
+- Add comment.
+- Upload supporting document.
+- Add hyperlink.
+- Run AI validation.
+- Save.
+- Certify.
+- Cancel or navigate back.
+
+### 13.5 Approver Actions
+
+The assigned Approver can:
+
+- View Preparer data.
+- Review items.
+- Review documents.
+- Add Approver comment.
+- Upload supporting document.
+- Add hyperlink.
+- Run AI validation.
+- Approve.
+- Reject with reason.
+- Navigate back.
+
+The Approver must not change the Preparer-owned reconciliating items unless an explicit future capability is introduced.
+
+---
+
+## 14. Reconciling Items
+
+### 14.1 Purpose
+
+Reconciling items represent supporting balances, adjustments, reconciling differences, or other evidence used by the Preparer.
+
+### 14.2 Recommended Fields
+
+- Item ID.
+- Reconciliation ID.
+- Line Number.
+- Item Type.
+- Item Description.
+- Item Reference.
+- Item Amount.
+- Item Amount in USD.
+- Item Currency.
+- Item Date.
+- Aging Bucket.
+- Required Adjustment flag.
+- Active flag.
+- Created By.
+- Created Role.
+- Created At.
+- Updated At.
+
+### 14.3 Recommended Item Types
+
+```text
+RECONCILING_ITEM
+ADJUSTMENT
+SUPPORTING_BALANCE
+OTHER
+```
+
+### 14.4 Soft Removal
+
+A removed item must be marked inactive. The application must not issue a physical database delete.
+
+### 14.5 Difference Display
+
+The UI may calculate and display:
+
+```text
+GL Account Balance
+minus
+Sum of Active Reconciling Items
+=
+Unreconciled Difference
+```
+
+The calculation is informational and must not post entries or alter source balances.
+
+---
+
+## 15. Comments, Documents, and Hyperlinks
+
+### 15.1 Comments
+
+Comments should support:
+
+- General comments.
+- Rejection comments.
+- System comments.
+- Role code.
+- Created By.
+- Reconciliation status at creation.
+- Edit indicator and Edit timestamp where editing is permitted.
+
+### 15.2 Supporting Documents
+
+Supporting documents should support:
+
+- Original file name.
+- File extension.
+- MIME type.
+- File size.
+- SHA-256 hash.
+- File content for Phase 1.
+- S3 key for a later storage phase.
+- Description.
+- Uploaded By.
+- Uploaded Role.
+- Uploaded At.
+- Active status.
+- AI validation-source indicator.
+
+### 15.3 Hyperlinks
+
+Hyperlinks should support:
+
+- URL.
+- Display text.
+- Description.
+- Added By.
+- Added Role.
+- Created At.
+- Updated At.
+
+---
+
+## 16. Certification Architecture
+
+### 16.1 Certification Actions
+
+The module supports:
+
+```text
+CERTIFY
+APPROVE
+REJECT
+DECERTIFY
+SYSTEM_CERTIFY
+```
+
+### 16.2 Certification Statuses
+
+```text
+PREPARED
+APPROVED
+REJECTED
+DECERTIFIED
+SYSTEM_CERTIFIED
+```
+
+### 16.3 Immutable Certification Record
+
+Every certification action must create a new immutable record containing:
+
+- Certification ID.
+- Reconciliation ID.
+- Assignment ID.
+- Role Code.
+- Action.
+- Certification Status.
+- Certification Statement.
+- Comments.
+- Rejection Reason Code.
+- Rejection Reason Text.
+- System flag.
+- Bulk flag.
+- Performed By.
+- Performed By Display.
+- Performed At.
+- Created At.
+
+Certification records must not be updated or deleted.
+
+### 16.4 Certification Statement
+
+The Account Reconciliation certification page must reuse the existing certification-statement component and styling.
+
+Preparer statement intent:
+
+- The account has been reconciled.
+- Reconciling items are valid and supported.
+- Supporting documentation is complete.
+- The reconciliation complies with applicable company policy.
+
+Approver statement intent:
+
+- The reconciliation and supporting documentation have been reviewed.
+- The account reconciliation is accurate and complete.
+- The approval complies with applicable company policy.
+
+System statement intent:
+
+- The account met the configured Zero-Balance System Certification rule.
+- The certification was completed automatically by the system.
+
+---
+
+## 17. Certification Details Screen
+
+### 17.1 Route
+
+```text
+/accounts/reconciliations/{reconciliationId}/certification-details
+```
+
+### 17.2 Purpose
+
+The page displays the immutable certification history.
+
+### 17.3 Suggested Columns
+
+- Status or Level.
+- Action.
+- Bulk.
+- Submitted By.
+- Submitted Date.
+- Reason.
+- Reason Code.
+- Comments.
+
+For System Certification, the Submitted By value should display:
+
+```text
+System
+```
+
+The page must be read-only.
+
+---
+
+## 18. AI Excel-Versus-Screen Validation
+
+### 18.1 Supported Contexts
+
+The same AI validation service supports:
+
+```text
+JOURNAL
+ACCOUNT
+```
+
+Context mapping:
+
+| Context | Context ID | Screen Data | Source Document |
+|---|---|---|---|
+| `JOURNAL` | Journal ID | Journal header and lines | Journal supporting document |
+| `ACCOUNT` | Reconciliation ID | Account header and reconciling items | Account supporting document |
+
+### 18.2 UI Action
+
+The Supporting Documents area should provide:
+
+```text
+Validate with AI
+```
+
+The action can be displayed at document level and at panel level.
+
+### 18.3 Validation Flow
+
+```text
+User selects Excel or CSV supporting document
+               |
+               v
+Backend authorization
+               |
+               v
+Load screen data from database
+               |
+               v
+Load and parse uploaded document
+               |
+               v
+Normalize dates, strings, identifiers, and amounts
+               |
+               v
+Compare using server-side deterministic logic
+               |
+               v
+Send minimized discrepancy descriptors to AI
+               |
+               v
+Classify discrepancy severity and explanation
+               |
+               v
+Persist immutable validation result
+               |
+               v
+Display results to user
+```
+
+### 18.4 Server-Side Responsibilities
+
+The server must perform:
+
+- Excel or CSV parsing.
+- Decimal conversion.
+- Rounding.
+- Tolerance evaluation.
+- Date normalization.
+- String trimming.
+- Identifier matching.
+- Row count comparison.
+- Match count calculation.
+- Discrepancy count calculation.
+
+The AI should be used only for:
+
+- Semantic column mapping.
+- Ambiguous row alignment.
+- Severity classification.
+- Short discrepancy explanation.
+
+### 18.5 Result Statuses
+
+Recommended statuses:
+
+```text
+PENDING
+MATCH
+DISCREPANCIES_FOUND
+ERROR
+TIMEOUT
+DECLINED
+```
+
+### 18.6 Result Fields
+
+- Validation ID.
+- Context Type.
+- Context ID.
+- Source Document ID.
+- Source File Name.
+- Rows Compared.
+- Fields Compared.
+- Match Count.
+- Discrepancy Count.
+- Result Status.
+- Discrepancy List.
+- Error Message.
+- Model Used.
+- Tokens Used.
+- Latency.
+- Requested By.
+- Requested Role.
+- Created At.
+
+### 18.7 Discrepancy Structure
+
+```json
+{
+  "field": "GL Account Balance",
+  "screen_value": "7000.00",
+  "file_value": "7000.10",
+  "row_ref": "Account 41114058618",
+  "severity": "HIGH",
+  "note": "The values differ by 0.10."
+}
+```
+
+### 18.8 AI Validation UI
+
+When all values match:
+
+```text
+No discrepancies found.
+```
+
+When differences exist, the table should show:
+
+- Field.
+- Screen Value.
+- File Value.
+- Row Reference.
+- Difference.
+- Severity.
+- Note.
+
+### 18.9 AI Governance
+
+1. AI validation must not update financial data.
+2. Raw ledgers should not be unnecessarily sent to the model.
+3. Prompts should contain minimized structured data.
+4. Every validation run must be audited.
+5. Validation errors must not corrupt the certification transaction.
+6. Validation should remain advisory unless configured as mandatory.
+7. Authorization must be enforced at both route and record level.
+
+---
+
+## 19. Database Architecture
+
+### 19.1 New Tables
+
+The module introduces the following tables:
+
+1. `account_file_load`.
+2. `account_reconciliation`.
+3. `account_recon_item`.
+4. `account_assignment`.
+5. `account_comment`.
+6. `account_document`.
+7. `account_hyperlink`.
+8. `account_certification`.
+9. `account_audit_log`.
+10. `account_zero_balance_rule`.
+11. `ai_validation_log`.
+
+### 19.2 Reused Existing Tables
+
+The module should reuse:
+
+- `users`.
+- `roles`.
+- `user_roles`.
+- `teams`.
+- `rejection_reason_master`.
+- `certification_statement_config`.
+- `app_config`.
+- `role_capabilities`.
+- `notification_log`.
+- Existing currency-rate tables where appropriate.
+
+### 19.3 Main Reconciliation Constraints
+
+Recommended constraints:
+
+```text
+Status must be one of the seven supported statuses.
+Preparer and Approver must be different when both are assigned.
+One reconciliation must exist per entity, account, period, and currency.
+One assignment per role per reconciliation.
+One item line number per reconciliation.
+```
+
+### 19.4 Important Indexes
+
+Recommended indexes include:
+
+- File-load status.
+- File uploaded date.
+- Reconciliation period.
+- Reconciliation status.
+- Period and status.
+- Company Code.
+- Region.
+- Team.
+- Source File ID.
+- Account Number.
+- Entity.
+- Preparer and status.
+- Approver and status.
+- Zero-balance flag and status.
+- `NOT_ASSIGNED` partial queue index.
+- Assignment user, role, and status.
+- Certification reconciliation ID.
+- Audit reconciliation ID.
+- Validation context type and context ID.
+
+---
+
+## 20. Proposed SQL Files
+
+### 20.1 `20_account_recon_schema.sql`
+
+Creates:
+
+- Account file-load table.
+- Reconciliation header.
+- Reconciliation items.
+- Assignments.
+- Comments.
+- Documents.
+- Hyperlinks.
+- Certification records.
+- Audit records.
+- Zero-balance rule configuration.
+- Constraints and indexes.
+
+### 20.2 `21_ai_validation_schema.sql`
+
+Creates:
+
+- `ai_validation_log`.
+- Context indexes.
+- Requester indexes.
+- Status indexes.
+- Source-document indexes.
+
+### 20.3 `22_account_recon_seed.sql`
+
+Seeds:
+
+- Zero-balance rules.
+- Account-specific rejection reasons.
+- Account Preparer certification statement.
+- Account Approver certification statement.
+- System Certification statement.
+- Application configuration keys.
+
+### 20.4 `23_account_recon_capabilities.sql`
+
+Seeds the Account Reconciliation and AI capabilities into the existing role-capability framework.
+
+### 20.5 `24_account_test_data.sql`
+
+Provides deterministic test data covering:
+
+- `NOT_ASSIGNED`.
+- `NOT_PREPARED`.
+- `PREPARED`.
+- `APPROVED`.
+- `REJECTED`.
+- `SYSTEM_CERTIFIED`.
+
+---
+
+## 21. API Architecture
+
+All endpoints use the existing API prefix:
+
+```text
+/api/v1
+```
+
+### 21.1 Upload and Queue APIs
+
+```text
+POST /api/v1/account-files/upload
+GET  /api/v1/account-files/{fileLoadId}
+GET  /api/v1/account-recon/queue
+POST /api/v1/account-recon/{reconciliationId}/assign
+POST /api/v1/account-recon/assign-bulk
+```
+
+### 21.2 Reconciliation APIs
+
+```text
+GET   /api/v1/account-recon
+GET   /api/v1/account-recon/{reconciliationId}
+GET   /api/v1/account-recon/{reconciliationId}/items
+POST  /api/v1/account-recon/{reconciliationId}/items
+PATCH /api/v1/account-recon/{reconciliationId}/items/{itemId}
+```
+
+The item-removal operation must be implemented as a soft-removal endpoint or a DELETE HTTP method that only sets `is_active = false`.
+
+### 21.3 Comment, Document, and Hyperlink APIs
+
+```text
+GET  /api/v1/account-recon/{reconciliationId}/comments
+POST /api/v1/account-recon/{reconciliationId}/comments
+
+GET  /api/v1/account-recon/{reconciliationId}/documents
+POST /api/v1/account-recon/{reconciliationId}/documents
+
+GET  /api/v1/account-recon/{reconciliationId}/hyperlinks
+POST /api/v1/account-recon/{reconciliationId}/hyperlinks
+```
+
+### 21.4 Certification APIs
+
+```text
+POST /api/v1/account-recon/{reconciliationId}/certify
+POST /api/v1/account-recon/{reconciliationId}/approve
+POST /api/v1/account-recon/{reconciliationId}/reject
+POST /api/v1/account-recon/{reconciliationId}/decertify
+GET  /api/v1/account-recon/{reconciliationId}/certification-details
+```
+
+### 21.5 AI Validation APIs
+
+```text
+POST /api/v1/ai/validate-file
+GET  /api/v1/ai/validations/{contextType}/{contextId}
+```
+
+### 21.6 Configuration APIs
+
+The existing role-permissions endpoint should return the new capabilities:
+
+```text
+GET /api/v1/config/role-permissions
+```
+
+An optional configuration endpoint can expose the active Zero-Balance rule:
+
+```text
+GET /api/v1/config/account-zero-balance-rules
+```
+
+---
+
+## 22. Backend Architecture and Folder Structure
+
+The module must follow the same FastAPI layering used by the existing Journal Certification application.
+
+```text
+backend/
+├── api/
+│   └── v1/
+│       ├── journals/
+│       ├── account_recon/
+│       │   ├── __init__.py
+│       │   ├── files_router.py
+│       │   ├── queue_router.py
+│       │   ├── recon_router.py
+│       │   └── certification_router.py
+│       └── ai/
+│           └── routers/
+│               └── validate_router.py
+├── services/
+│   ├── journal_service.py
+│   └── account_recon/
+│       ├── __init__.py
+│       ├── account_file_service.py
+│       ├── account_parser.py
+│       ├── zero_balance_evaluator.py
+│       ├── account_assignment_service.py
+│       ├── account_recon_service.py
+│       └── account_certification_service.py
+├── ai/
+│   ├── services/
+│   │   └── validation_service.py
+│   ├── schemas/
+│   │   └── validation.py
+│   └── prompts/
+│       └── validation_prompt.py
+├── domain/
+│   └── account_recon/
+│       ├── __init__.py
+│       ├── entities.py
+│       ├── status_machine.py
+│       └── repositories.py
+├── infrastructure/
+│   └── db/
+│       ├── account_recon_repo.py
+│       └── ai_validation_repo.py
+└── sql/
+    └── account_recon/
+        ├── 20_account_recon_schema.sql
+        ├── 21_ai_validation_schema.sql
+        ├── 22_account_recon_seed.sql
+        ├── 23_account_recon_capabilities.sql
+        └── 24_account_test_data.sql
+```
+
+### 22.1 Layer Responsibilities
+
+#### API Routers
+
+- Validate requests.
+- Enforce authorization.
+- Call services.
+- Format responses.
+- Avoid direct SQL.
+
+#### Services
+
+- Define transaction boundaries.
+- Enforce business rules.
+- Apply the status machine.
+- Coordinate repositories.
+- Create audit records.
+- Generate notifications.
+
+#### Domain
+
+- Define entities.
+- Define valid transitions.
+- Define pure business-rule functions.
+
+#### Infrastructure
+
+- Execute SQL.
+- Map result sets.
+- Persist business records.
+- Avoid embedding workflow logic.
+
+---
+
+## 23. Frontend Architecture and Folder Structure
+
+The frontend must follow the existing Next.js App Router architecture.
+
+```text
+app/
+├── (authenticated)/
+│   ├── journals/
+│   │   └── [journalId]/
+│   │       └── page.tsx
+│   ├── accounts/
+│   │   └── reconciliations/
+│   │       ├── page.tsx
+│   │       ├── layout.tsx
+│   │       └── [reconciliationId]/
+│   │           ├── page.tsx
+│   │           └── certification-details/
+│   │               └── page.tsx
+│   └── admin/
+│       ├── upload-accounts/
+│       │   └── page.tsx
+│       └── account-recon-queue/
+│           └── page.tsx
+├── components/
+│   ├── accounts/
+│   │   ├── ReconciliationGrid.tsx
+│   │   ├── ReconciliationHeader.tsx
+│   │   ├── ReconItemsPanel.tsx
+│   │   ├── CommentsPanel.tsx
+│   │   ├── DocumentsPanel.tsx
+│   │   ├── HyperlinksPanel.tsx
+│   │   ├── CertificationStatementBox.tsx
+│   │   └── AssignDrawer.tsx
+│   └── ai/
+│       ├── AiValidationButton.tsx
+│       └── AiValidationResult.tsx
+├── lib/
+│   ├── api/
+│   │   ├── accountRecon.ts
+│   │   └── aiValidation.ts
+│   └── constants/
+│       ├── rolePermissions.ts
+│       └── accountStatus.ts
+├── theme/
+│   └── antdTheme.ts
+└── styles/
+    └── bl-tokens.css
+```
+
+### 23.1 Frontend Technology Use
+
+- TanStack Query for server state.
+- Axios with the existing authentication interceptor.
+- React Hook Form for form state.
+- Zod for client validation.
+- Ant Design for grids, drawers, tables, and complex forms.
+- Bootstrap for simple pages where the existing architecture already uses Bootstrap.
+- Day.js for date and period formatting.
+
+### 23.2 Shared Components
+
+The following components should be shared between Journal and Account workflows where possible:
+
+- Certification statement.
+- Comments panel.
+- Documents panel patterns.
+- Hyperlinks panel.
+- AI Validation button.
+- AI Validation result table.
+- Status badge component.
+- Header and footer shell.
+
+---
+
+## 24. UI Design and Styling Standards
+
+The new module must visually match the existing application.
+
+### 24.1 Logo
+
+Use the existing Baxter logo configuration in the global header and footer.
+
+### 24.2 Typography
+
+Use the existing application font stack:
+
+```css
+font-family: "Segoe UI", Arial, Helvetica, sans-serif;
+```
+
+### 24.3 Existing Design Tokens
+
+The module must reuse the existing CSS variables and Ant Design theme configuration. No independent color system should be introduced.
+
+Representative tokens include:
+
+```css
+--bl-sidebar-bg: #2C2547;
+--bl-header-bg: #FFFFFF;
+--bl-footer-bg: #F2F4F7;
+--bl-page-bg: #F2F4F7;
+--bl-panel-bg: #FFFFFF;
+--bl-panel-border: #E0E3E8;
+--bl-grid-header-bg: #F5F6F8;
+--bl-grid-row-hover: #F0F4FF;
+--bl-btn-primary-bg: #0066CC;
+--bl-btn-danger-border: #C0392B;
+--bl-btn-secondary-border: #C7CDD6;
+--bl-status-not-prepared: #E65100;
+--bl-status-prepared: #2E7D32;
+--bl-status-approved: #2E7D32;
+--bl-status-rejected: #B71C1C;
+--bl-status-in-progress: #F57C00;
+--bl-status-certified: #37474F;
+--bl-ai-bg: #F8F4FF;
+--bl-ai-border: #9C27B0;
+--bl-ai-icon: #7B1FA2;
+```
+
+### 24.4 Status Badge Mapping
+
+| Status | Display | Suggested Existing Token |
+|---|---|---|
+| `NOT_ASSIGNED` | Not Assigned | Not-prepared orange |
+| `NOT_PREPARED` | Not Prepared | Not-prepared orange |
+| `PREPARED` | Prepared | Prepared green |
+| `APPROVED` | Approved | Approved green |
+| `REJECTED` | Rejected | Rejected dark red |
+| `DECERTIFIED` | Decertified | In-progress amber |
+| `SYSTEM_CERTIFIED` | System Certified | Certified dark grey |
+
+### 24.5 Certification Statement Styling
+
+The Account certification statement must be identical to the Journal certification statement:
+
+- Heading in bold.
+- Existing policy-body font size.
+- Existing policy-link treatment.
+- Existing signature font.
+- Existing right alignment.
+- Read-only state after submission.
+
+### 24.6 Buttons
+
+Preparer screen:
+
+```text
+Save
+Certify
+Cancel
+```
+
+Approver screen:
+
+```text
+Certify or Approve
+Reject
+Back
+```
+
+Button colors, borders, radii, hover states, and spacing must use the existing design system.
+
+### 24.7 CSS Scoping
+
+Ant Design and Bootstrap CSS must not be imported in a way that creates style collisions. The existing route-segment scoping strategy must be followed.
+
+---
+
+## 25. Security and RBAC
+
+### 25.1 Reused Security Model
+
+The module must reuse:
+
+- JWT authentication.
+- Active-role selection.
+- Role-to-capability mapping.
+- API capability guards.
+- Record-level authorization.
+- Centralized logging.
+- Existing user and role tables.
+
+### 25.2 New Capabilities
+
+```text
+upload_account_file
+view_account_admin_queue
+assign_account_recon
+certify_account_as_preparer
+certify_account_as_approver
+reject_account
+decertify_account
+add_account_item
+add_account_document
+add_account_comment
+add_account_hyperlink
+view_all_account_recons
+run_ai_validation
+```
+
+### 25.3 Role Mapping Summary
+
+#### System Admin, Business Admin, and Local Admin
+
+May receive:
+
+- Upload account files.
+- View Admin queue.
+- Assign reconciliations.
+- View all reconciliations.
+- Perform configured administrative certification actions.
+- Run AI validation.
+
+#### Preparer
+
+May receive:
+
+- View assigned reconciliations.
+- Add items.
+- Add comments.
+- Add documents.
+- Add hyperlinks.
+- Certify.
+- Decertify where permitted.
+- Run AI validation.
+
+#### Approver
+
+May receive:
+
+- View assigned prepared reconciliations.
+- Add comments.
+- Add documents.
+- Add hyperlinks.
+- Approve.
+- Reject.
+- Run AI validation.
+
+#### Reviewer, Account Reviewer, Account Manager, and Internal Auditor
+
+May receive appropriate read, comment, and AI-validation capabilities according to the approved role matrix.
+
+### 25.4 Record-Level Authorization
+
+The backend must ensure that a user cannot access a reconciliation solely by guessing the reconciliation identifier. Access must be allowed only when:
+
+- The user is assigned to the reconciliation.
+- The user's active role has view-all capability.
+- Another explicit authorization rule grants access.
+
+---
+
+## 26. Notifications
+
+The module should reuse the existing notification framework and notification log.
+
+Recommended events:
+
+```text
+ACCOUNT_ASSIGNED
+ACCOUNT_PREPARER_CERTIFIED
+ACCOUNT_APPROVER_APPROVED
+ACCOUNT_APPROVER_REJECTED
+ACCOUNT_DECERTIFIED
+ACCOUNT_SYSTEM_CERTIFIED
+```
+
+Recommended recipients:
+
+| Event | Recipient |
+|---|---|
+| Account assigned | Preparer |
+| Preparer certified | Approver |
+| Approver approved | Preparer |
+| Approver rejected | Preparer |
+| Account decertified | Relevant assigned users |
+| System Certified summary | Administrator or configured distribution |
+
+---
+
+## 27. Audit Requirements
+
+Every significant event must create an immutable audit record.
+
+Recommended audit types:
+
+```text
+FILE_UPLOADED
+FILE_PARSING_STARTED
+FILE_PARSED
+FILE_PARSE_FAILED
+RECON_CREATED
+ZERO_BALANCE_SYSTEM_CERTIFIED
+ASSIGNMENT_CREATED
+ASSIGNMENT_CHANGED
+ITEM_ADDED
+ITEM_UPDATED
+ITEM_DEACTIVATED
+COMMENT_ADDED
+DOCUMENT_ADDED
+HYPERLINK_ADDED
+PREPARER_CERTIFIED
+APPROVER_APPROVED
+APPROVER_REJECTED
+DECERTIFIED
+AI_VALIDATION_RUN
+STATUS_CHANGED
+CLOSED
+```
+
+Audit data should include:
+
+- Audit ID.
+- Reconciliation ID.
+- File Load ID.
+- Action Type.
+- Old Status.
+- New Status.
+- Actor.
+- Actor Role.
+- Message.
+- Structured metadata.
+- Correlation ID.
+- Created At.
+
+---
+
+## 28. Application Configuration
+
+Recommended configuration keys:
+
+```text
+account_recon_enabled
+account_file_expected_columns
+account_file_delimiter
+account_zero_balance_active_rule
+account_admin_manual_assignment
+ai_validation_enabled
+ai_validation_default_model
+ai_validation_amount_tolerance
+```
+
+Recommended default values:
+
+| Key | Default |
+|---|---|
+| `account_recon_enabled` | `true` |
+| `account_file_expected_columns` | `25` |
+| `account_file_delimiter` | `TAB` |
+| `account_zero_balance_active_rule` | `ZERO_BAL_NO_ACTIVITY` |
+| `account_admin_manual_assignment` | `true` |
+| `ai_validation_enabled` | `true` |
+| `ai_validation_amount_tolerance` | `0.01` |
+
+The AI model must be controlled by the existing environment-aware AI configuration rather than being tightly coupled to a hard-coded provider name.
+
+---
+
+## 29. Error Handling
+
+The module must use the existing centralized error-handling framework.
+
+### 29.1 File Errors
+
+Examples:
+
+- Invalid file type.
+- Unsupported encoding.
+- Missing columns.
+- Invalid date.
+- Invalid amount.
+- Invalid Boolean.
+- Duplicate account-period combination.
+- File parsing failure.
+
+### 29.2 Assignment Errors
+
+Examples:
+
+- Preparer not selected.
+- Approver not selected.
+- Preparer equals Approver.
+- Inactive user.
+- Invalid role.
+- Reconciliation is no longer assignable.
+
+### 29.3 Workflow Errors
+
+Examples:
+
+- Invalid status transition.
+- User is not the assigned Preparer.
+- User is not the assigned Approver.
+- Missing rejection reason.
+- Missing required supporting document.
+- Terminal reconciliation cannot be changed.
+
+### 29.4 AI Validation Errors
+
+Examples:
+
+- Unsupported file type.
+- Empty workbook.
+- Missing mapped columns.
+- Ambiguous row alignment.
+- Provider timeout.
+- Provider unavailable.
+- Validation disabled.
+
+AI failures must return a safe user message and must not alter financial or certification data.
+
+---
+
+## 30. Deployment Architecture
+
+### 30.1 SQL Execution Order
+
+After installing the existing base schema and seed scripts, execute:
+
+```text
+20_account_recon_schema.sql
+21_ai_validation_schema.sql
+22_account_recon_seed.sql
+23_account_recon_capabilities.sql
+24_account_test_data.sql
+```
+
+The test-data script is optional outside development and test environments.
+
+### 30.2 Backend Deployment
+
+1. Register Account Reconciliation routers.
+2. Register the AI validation router.
+3. Deploy parser and workflow services.
+4. Verify capability middleware.
+5. Verify database migrations.
+6. Verify notification integration.
+7. Verify provider configuration for AI validation.
+
+### 30.3 Frontend Deployment
+
+1. Deploy Account Reconciliation routes.
+2. Deploy Admin upload route.
+3. Deploy Admin queue route.
+4. Add the Accounts navigation entry.
+5. Add the AI validation action to Journal Details.
+6. Verify shared design tokens and theme imports.
+7. Verify role-based button visibility.
+
+### 30.4 Feature Toggle
+
+The complete module can be disabled through:
+
+```text
+account_recon_enabled = false
+```
+
+AI validation can be independently disabled through:
+
+```text
+ai_validation_enabled = false
+```
+
+Disabling a feature must not delete any business data.
+
+---
+
+## 31. Supported Screens
+
+| Screen | Route |
+|---|---|
+| Upload Accounts | `/admin/upload-accounts` |
+| Account Reconciliation Admin Queue | `/admin/account-recon-queue` |
+| Manual Assignment Drawer | Within the Admin queue |
+| View Reconciliations | `/accounts/reconciliations` |
+| Reconciliation Details | `/accounts/reconciliations/{reconciliationId}` |
+| Certification Details | `/accounts/reconciliations/{reconciliationId}/certification-details` |
+| Journal AI Validation | Existing Journal Details route |
+| Account AI Validation | Reconciliation Details route |
+
+Unsupported or unimplemented account routes should follow the existing 404 strategy and must not display incomplete placeholder functionality as a completed screen.
+
+---
+
+## 32. Testing Strategy
+
+### 32.1 File Upload Tests
+
+- Valid account file.
+- Invalid file extension.
+- Empty file.
+- Missing mandatory columns.
+- Invalid period date.
+- Invalid balance.
+- Duplicate account-period row.
+- Mixed valid and invalid rows.
+- Re-upload of the same file.
+
+### 32.2 Zero-Balance Tests
+
+- Zero balance and no activity.
+- Null balance and no activity.
+- Zero balance with activity.
+- Non-zero balance without activity.
+- Tolerance boundary.
+- Inactive System Certification rule.
+- Unsupported assignment type.
+
+### 32.3 Assignment Tests
+
+- Valid Preparer and Approver.
+- Same user selected for both roles.
+- Inactive user.
+- Missing Preparer.
+- Missing Approver.
+- Unauthorized administrator.
+- Bulk assignment with partial errors.
+
+### 32.4 Preparer Tests
+
+- Add item.
+- Edit item.
+- Soft-remove item.
+- Add comment.
+- Add document.
+- Add hyperlink.
+- Certify with required evidence.
+- Certify without required evidence.
+- Recertify after rejection.
+- Decertify and recertify.
+
+### 32.5 Approver Tests
+
+- View read-only Preparer data.
+- Approve prepared reconciliation.
+- Reject without reason.
+- Reject with reason.
+- Unauthorized approval.
+- Attempt approval of terminal reconciliation.
+
+### 32.6 AI Validation Tests
+
+- Journal file matches screen data.
+- Account file matches screen data.
+- Amount discrepancy.
+- Currency discrepancy.
+- Date discrepancy.
+- Missing row.
+- Extra row.
+- Column-name variation.
+- Unsupported workbook.
+- Provider timeout.
+- Validation disabled.
+- Verify that no business data is mutated.
+
+### 32.7 Security Tests
+
+- JWT missing.
+- JWT invalid.
+- Capability missing.
+- User accesses another user's reconciliation.
+- Admin view-all access.
+- Same-user constraint.
+- Direct API calls bypassing frontend controls.
+
+---
+
+## 33. Verification Queries
+
+### 33.1 Confirm New Tables
+
+```sql
+SELECT table_name
+FROM information_schema.tables
+WHERE table_name LIKE 'account_%'
+   OR table_name = 'ai_validation_log'
+ORDER BY table_name;
+```
+
+### 33.2 Confirm Active Zero-Balance Rule
+
+```sql
+SELECT rule_code, rule_name, is_active
+FROM account_zero_balance_rule
+WHERE is_active = TRUE;
+```
+
+### 33.3 Confirm Capabilities
+
+```sql
+SELECT capability, COUNT(*) AS role_count
+FROM role_capabilities
+WHERE capability LIKE '%account%'
+   OR capability = 'run_ai_validation'
+GROUP BY capability
+ORDER BY capability;
+```
+
+### 33.4 Confirm Reconciliation Status Distribution
+
+```sql
+SELECT status, COUNT(*) AS reconciliation_count
+FROM account_reconciliation
+GROUP BY status
+ORDER BY status;
+```
+
+### 33.5 Confirm System Certifications
+
+```sql
+SELECT
+    ar.reconciliation_id,
+    ar.account_number,
+    ar.status,
+    ar.auto_cert_rule_code,
+    ac.certification_status,
+    ac.performed_by_display,
+    ac.performed_at
+FROM account_reconciliation ar
+JOIN account_certification ac
+  ON ac.reconciliation_id = ar.reconciliation_id
+WHERE ar.status = 'SYSTEM_CERTIFIED'
+ORDER BY ac.performed_at DESC;
+```
+
+---
+
+## 34. Implementation Sequence
+
+### Phase 1: Database Foundation
+
+1. Create account tables.
+2. Create AI validation table.
+3. Create indexes and constraints.
+4. Seed rules, reasons, statements, configuration, and capabilities.
+5. Add development test data.
+
+### Phase 2: Backend Foundation
+
+1. Implement repositories.
+2. Implement file upload.
+3. Implement parser.
+4. Implement Zero-Balance evaluator.
+5. Implement assignment service.
+6. Implement reconciliation service.
+7. Implement certification service.
+8. Implement audit and notifications.
+
+### Phase 3: Frontend Foundation
+
+1. Create Upload Accounts screen.
+2. Create Admin queue.
+3. Create Assignment drawer.
+4. Create View Reconciliations grid.
+5. Create Reconciliation Details screen.
+6. Create Certification Details screen.
+
+### Phase 4: AI Validation
+
+1. Implement Excel and CSV parsing.
+2. Implement deterministic normalization and comparison.
+3. Implement minimized AI classification.
+4. Add AI validation actions to Journal and Account Details.
+5. Add immutable validation history.
+
+### Phase 5: Stabilization
+
+1. Complete RBAC tests.
+2. Complete workflow tests.
+3. Complete System Certification tests.
+4. Complete regression tests for Journal Certification.
+5. Validate visual parity.
+6. Validate performance and indexes.
+7. Validate audit completeness.
+
+---
+
+## 35. Final Integration Guarantees
+
+The architecture provides the following guarantees:
+
+1. The Account Reconciliation module is standalone but integration-ready.
+2. Existing Journal Certification workflows remain operational.
+3. Existing application styles and components are reused.
+4. Existing JWT and RBAC architecture is reused.
+5. Existing users, roles, teams, notification, rejection-reason, and certification-statement structures are reused.
+6. Zero-Balance certification is configuration-driven and auditable.
+7. Manual assignment enforces Preparer and Approver separation.
+8. Preparer and Approver workflows follow the existing certification pattern.
+9. AI validation is shared across Journal and Account Details.
+10. AI validation does not alter financial data.
+11. All migrations are additive and should be idempotent.
+12. All mutable and immutable table conventions follow the existing architecture.
+13. The module can be disabled through configuration without deleting data.
+14. Future SQL and business rules can be added without redesigning the module foundation.
+
+---
+
+## 36. Conclusion
+
+This architecture introduces a complete Account Reconciliation Certification module, Zero-Balance System Certification engine, and shared AI Excel-versus-screen validation framework.
+
+The design preserves the existing Journal Certification application's architecture, security model, database conventions, deployment style, UI standards, folder organization, audit requirements, and operational controls. The new functionality is additive, modular, SQL-first, auditable, configurable, and ready to be integrated into the existing application codebase.
+
+
+
+
+-- =============================================================================
+-- BlackLine Journal Certification Pilot — Full Database Schema + Indexes
+-- =============================================================================
+-- Version  : 3.0  (Phase 0 consolidation — see Docs/ArchitecturePlanV2.md §2)
+-- Date     : 2026 (Phase 0 execution)
+-- Source   : Merged from sql/schema.sql (v2.0) + sql/indexes.sql (v2.0)
+--
+-- This file REPLACES sql/schema.sql, sql/indexes.sql, and the stale
+-- sql/schema_indexes.sql (which was frozen at §9.27 and missing
+-- journal_comment_history + user_dashboard_cards + several indexes).
+-- Do not recreate those three files — this is the single schema source of truth.
+--
+-- Rules:
+--   • No DELETE anywhere — use is_active = FALSE or soft-delete flags
+--   • Immutable tables (journal_certification, journal_audit_log, ai_session_log)
+--     have created_at only — no updated_at, no UPDATE, no DELETE ever
+--   • All FK constraints are inline — tables ordered by dependency
+--   • IF NOT EXISTS on every CREATE TABLE / CREATE INDEX
+--   • Each table's CREATE INDEX statements live directly beneath its
+--     CREATE TABLE block — one design decision, one place (§2.4 of the plan)
+-- =============================================================================
+
+-- =============================================================================
+-- 9.17  rejection_reason_master  (no dependencies — must precede journal_certification)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS rejection_reason_master (
+    id              BIGSERIAL PRIMARY KEY,
+    reason_code     VARCHAR(100) UNIQUE NOT NULL,
+    reason_text     VARCHAR(500) NOT NULL,
+    description     TEXT,
+    is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+-- Seed: MISSING_SUPPORT, INCORRECT_AMOUNT, INCORRECT_ACCOUNT,
+--       INSUFFICIENT_COMMENT, OTHER
+-- (no dedicated indexes)
+
+-- =============================================================================
+-- 9.1  users
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS users (
+    id                          BIGSERIAL PRIMARY KEY,
+
+    -- Identity
+    user_id                     VARCHAR(100) UNIQUE NOT NULL,
+    adid                        VARCHAR(100) UNIQUE,
+    username                    VARCHAR(100) UNIQUE NOT NULL,
+
+    -- Credentials
+    password_hash               VARCHAR(500),
+    api_key_hash                VARCHAR(500),
+    api_key_created_at          TIMESTAMP WITH TIME ZONE,
+
+    -- Profile
+    first_name                  VARCHAR(100),
+    last_name                   VARCHAR(100),
+    display_name                VARCHAR(255) NOT NULL,
+    email                       VARCHAR(255) UNIQUE,
+    status                      VARCHAR(50) NOT NULL DEFAULT 'ACTIVE',
+    -- Values: ACTIVE | INACTIVE | LOCKED | SUSPENDED
+
+    job_title                   VARCHAR(255),
+    supervisor                  VARCHAR(100),           -- free-text supervisor name or ADID
+    supervisor_user_id          VARCHAR(100),           -- FK added below after table create
+    phone                       VARCHAR(50),
+    preferred_timezone          VARCHAR(100) NOT NULL DEFAULT 'UTC',
+    user_annual_hours           NUMERIC(8, 2),
+
+    -- Auth / SSO
+    auth_provider               VARCHAR(50) NOT NULL DEFAULT 'LOCAL',
+    sso_subject                 VARCHAR(255),
+    active_role_code            VARCHAR(50),                -- current active role; FK added below
+
+    -- Feature flags (per-user overrides confirmed from 1.24.34 AM screenshot)
+    require_journal_reviewer    BOOLEAN NOT NULL DEFAULT FALSE,
+    user_mentions_enabled       BOOLEAN NOT NULL DEFAULT TRUE,
+    allow_edit_journal_config   BOOLEAN NOT NULL DEFAULT FALSE,
+    allow_edit_ic_config        BOOLEAN NOT NULL DEFAULT FALSE,
+    allow_adhoc_matching        BOOLEAN NOT NULL DEFAULT FALSE,
+    allow_ic_settlement         BOOLEAN NOT NULL DEFAULT FALSE,
+
+    -- Lifecycle
+    is_active                   BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at                  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at                  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Self-referencing FK applied after table creation
+ALTER TABLE users
+    ADD CONSTRAINT fk_users_supervisor
+    FOREIGN KEY (supervisor_user_id) REFERENCES users(user_id)
+    DEFERRABLE INITIALLY DEFERRED;
+
+CREATE INDEX IF NOT EXISTS idx_users_adid
+    ON users(adid);
+CREATE INDEX IF NOT EXISTS idx_users_email
+    ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_username
+    ON users(username);
+CREATE INDEX IF NOT EXISTS idx_users_status_active
+    ON users(status, is_active);
+
+-- =============================================================================
+-- 9.2  roles
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS roles (
+    id              BIGSERIAL PRIMARY KEY,
+    role_code       VARCHAR(50) UNIQUE NOT NULL,
+    role_name       VARCHAR(100) NOT NULL,
+    ui_display_name VARCHAR(150) NOT NULL,
+    badge_color     VARCHAR(20) DEFAULT '#555555',
+    description     TEXT,
+    is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+-- Seed: PREPARER, APPROVER, REVIEWER, FINANCIAL_REVIEWER, ACCOUNT_REVIEWER,
+--       FINANCIAL_MANAGER, ACCOUNT_MANAGER, INTERNAL_AUDITOR, EXECUTIVE, CFO,
+--       EXTERNAL_AUDITOR, LOCAL_ADMIN, BUSINESS_ADMIN, SYSTEM_ADMIN, CONSULTANT,
+--       API_ACCESS
+-- (no dedicated indexes)
+
+-- FK for users.active_role_code → roles (applied after roles table is created)
+ALTER TABLE users
+    ADD CONSTRAINT fk_users_active_role
+    FOREIGN KEY (active_role_code) REFERENCES roles(role_code);
+
+-- =============================================================================
+-- 9.3  user_roles
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS user_roles (
+    id          BIGSERIAL PRIMARY KEY,
+    user_id     VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    role_code   VARCHAR(50)  NOT NULL REFERENCES roles(role_code),
+    granted_by  VARCHAR(100) REFERENCES users(user_id),
+    granted_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(user_id, role_code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_roles_user_id
+    ON user_roles(user_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_user_roles_role_code
+    ON user_roles(role_code, is_active);
+
+-- =============================================================================
+-- 9.4  user_session
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS user_session (
+    id               BIGSERIAL PRIMARY KEY,
+    session_id       VARCHAR(200) UNIQUE NOT NULL,
+    user_id          VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    active_role_code VARCHAR(50)  REFERENCES roles(role_code),
+    jwt_jti          VARCHAR(200) UNIQUE,
+    login_at         TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    last_activity_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    expires_at       TIMESTAMP WITH TIME ZONE,
+    ip_address       VARCHAR(50),
+    user_agent       TEXT,
+    is_active        BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_session_user_id
+    ON user_session(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_session_jti
+    ON user_session(jwt_jti);
+CREATE INDEX IF NOT EXISTS idx_user_session_active
+    ON user_session(user_id, is_active, expires_at);
+
+-- =============================================================================
+-- 9.5  teams
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS teams (
+    id          BIGSERIAL PRIMARY KEY,
+    team_id     VARCHAR(100) UNIQUE NOT NULL,
+    team_name   VARCHAR(255) NOT NULL,
+    company_code VARCHAR(50),
+    region      VARCHAR(100),
+    description TEXT,
+    is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+-- (no dedicated indexes)
+
+-- =============================================================================
+-- 9.6  role_external_mapping
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS role_external_mapping (
+    id                              BIGSERIAL PRIMARY KEY,
+    mapping_id                      VARCHAR(100) UNIQUE NOT NULL,
+    external_role_code              VARCHAR(100) NOT NULL,
+    normalized_external_role_code   VARCHAR(100) NOT NULL,
+    internal_role_code              VARCHAR(50)  NOT NULL REFERENCES roles(role_code),
+    source_system                   VARCHAR(100) NOT NULL DEFAULT 'JDE',
+    description                     TEXT,
+    is_active                       BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at                      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at                      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(external_role_code, source_system)
+);
+-- Seed: BLPREPARER → PREPARER, BLAPPROVER → APPROVER
+-- (no dedicated indexes)
+
+-- =============================================================================
+-- 9.7  jde_user_dependency_mapping
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS jde_user_dependency_mapping (
+    id                  BIGSERIAL PRIMARY KEY,
+    dependency_id       VARCHAR(100) UNIQUE NOT NULL,
+    preparer_adid       VARCHAR(100) NOT NULL,
+    preparer_user_id    VARCHAR(100) REFERENCES users(user_id),
+    preparer_role_code  VARCHAR(100) NOT NULL DEFAULT 'BLPREPARER',
+    approver_adid       VARCHAR(100) NOT NULL,
+    approver_user_id    VARCHAR(100) REFERENCES users(user_id),
+    approver_role_code  VARCHAR(100) NOT NULL DEFAULT 'BLAPPROVER',
+    company_code        VARCHAR(50),
+    region               VARCHAR(100),
+    team_id              VARCHAR(100) REFERENCES teams(team_id),
+    effective_from       DATE,
+    effective_to         DATE,
+    source_system        VARCHAR(100) NOT NULL DEFAULT 'JDE',
+    source_file_name     VARCHAR(500),
+    is_active            BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at           TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at           TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_jde_diff_adid CHECK (preparer_adid <> approver_adid),
+    CONSTRAINT chk_jde_diff_user CHECK (
+        preparer_user_id IS NULL
+        OR approver_user_id IS NULL
+        OR preparer_user_id <> approver_user_id
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_dep_preparer_adid
+    ON jde_user_dependency_mapping(preparer_adid, is_active);
+CREATE INDEX IF NOT EXISTS idx_dep_approver_adid
+    ON jde_user_dependency_mapping(approver_adid, is_active);
+CREATE INDEX IF NOT EXISTS idx_dep_company
+    ON jde_user_dependency_mapping(company_code, is_active);
+CREATE INDEX IF NOT EXISTS idx_dep_team_id
+    ON jde_user_dependency_mapping(team_id);
+
+-- =============================================================================
+-- 9.18  currency_conversion_rate  (no dependencies)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS currency_conversion_rate (
+    id               BIGSERIAL PRIMARY KEY,
+    rate_id          VARCHAR(100) UNIQUE NOT NULL,
+    from_currency    VARCHAR(10) NOT NULL,
+    to_currency      VARCHAR(10) NOT NULL DEFAULT 'USD',
+    conversion_rate  NUMERIC(18, 8) NOT NULL,
+    effective_from   DATE NOT NULL,
+    effective_to     DATE,
+    source_system    VARCHAR(100) NOT NULL DEFAULT 'CONFIG_SEED',
+    source_file_name VARCHAR(500),
+    load_batch_id    VARCHAR(100),
+    is_active        BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(from_currency, to_currency, effective_from)
+);
+-- Seeded from currency data.txt — no UI upload for this table
+-- SYSTEM_ADMIN can view. No edit/delete via UI.
+
+CREATE INDEX IF NOT EXISTS idx_ccr_lookup
+    ON currency_conversion_rate(from_currency, to_currency, effective_from, is_active);
+
+-- =============================================================================
+-- 9.8  journal_file_load
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS journal_file_load (
+    id                    BIGSERIAL PRIMARY KEY,
+    file_load_id          VARCHAR(100) UNIQUE NOT NULL,
+    original_file_name    VARCHAR(500) NOT NULL,
+    file_extension        VARCHAR(50),
+    mime_type             VARCHAR(255),
+    file_size_bytes       BIGINT,
+    file_hash_sha256      VARCHAR(64),
+    file_content          BYTEA NOT NULL,
+    source_type           VARCHAR(50) NOT NULL DEFAULT 'MANUAL_UPLOAD',
+    delimiter             VARCHAR(20) NOT NULL DEFAULT 'TAB',
+    expected_column_count INTEGER NOT NULL DEFAULT 27,
+    total_rows            INTEGER NOT NULL DEFAULT 0,
+    valid_rows            INTEGER NOT NULL DEFAULT 0,
+    invalid_rows          INTEGER NOT NULL DEFAULT 0,
+    journals_created      INTEGER NOT NULL DEFAULT 0,
+    status                VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+    -- Values: PENDING | UPLOADING | PARSING | PARSE_SUCCESS | PARSE_FAILED | ASSIGNMENT_FAILED
+    error_message         TEXT,
+    parse_errors_json     JSONB,
+    uploaded_by           VARCHAR(100) REFERENCES users(user_id),
+    uploaded_role         VARCHAR(50)  REFERENCES roles(role_code),
+    uploaded_at           TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    processed_at          TIMESTAMP WITH TIME ZONE,
+    created_at            TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at            TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_file_load_uploaded_by
+    ON journal_file_load(uploaded_by);
+CREATE INDEX IF NOT EXISTS idx_file_load_status
+    ON journal_file_load(status);
+CREATE INDEX IF NOT EXISTS idx_file_load_uploaded_at
+    ON journal_file_load(uploaded_at DESC);
+
+-- =============================================================================
+-- 9.9  journal_header
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS journal_header (
+    id                      BIGSERIAL PRIMARY KEY,
+
+    -- Primary key used in application
+    journal_id              VARCHAR(100) UNIQUE NOT NULL,
+
+    -- Source file link
+    source_file_id          VARCHAR(100) NOT NULL REFERENCES journal_file_load(file_load_id),
+
+    -- ── From JDE source file (27-col format) ───────────────────────────────────────────────
+    document_type           VARCHAR(50)  NOT NULL,
+    document_number         VARCHAR(100) NOT NULL,
+    gl_date                 DATE         NOT NULL,
+    journal_period          VARCHAR(7)   NOT NULL,     -- MM/YYYY format
+    period_number           INTEGER,
+    fiscal_year              INTEGER,
+    batch_id                VARCHAR(100),              -- col 6: BatchNumber (display as Batch ID)
+    batch_date              DATE,
+    ledger_type             VARCHAR(50),
+    reverse_or_void         VARCHAR(50),
+    company_code            VARCHAR(50),
+    batch_type              VARCHAR(50),
+    currency                VARCHAR(10),
+    exchange_rate           NUMERIC(18, 8) DEFAULT 0,
+    region                   VARCHAR(100),
+
+    -- ── Computed / application-level amounts ──────────────────────────────
+    bl_currency_rate_usd    NUMERIC(18, 8) DEFAULT 1,  -- BL currency rate to USD
+    total_debit             NUMERIC(18, 2) NOT NULL DEFAULT 0,
+    total_credit            NUMERIC(18, 2) NOT NULL DEFAULT 0,
+    total_debit_usd         NUMERIC(18, 2) NOT NULL DEFAULT 0,
+    total_credit_usd        NUMERIC(18, 2) NOT NULL DEFAULT 0,
+
+    -- ── Denormalized display columns (27-col grid) ──────────────────────
+    baxter_id            VARCHAR(100),              -- External BlackLine identifier (e.g. BX_1511900)
+    template                 VARCHAR(255) NOT NULL DEFAULT 'Generic',
+    team_id                  VARCHAR(100) REFERENCES teams(team_id),
+    posting_status           VARCHAR(100),
+    header_status_display    VARCHAR(255),
+    final_certification_state VARCHAR(100),
+    is_completed             BOOLEAN NOT NULL DEFAULT FALSE,
+
+    -- Denormalized user references (populated on assignment — avoids JOIN for grid)
+    preparer_user_id        VARCHAR(100) REFERENCES users(user_id),
+    approver_user_id        VARCHAR(100) REFERENCES users(user_id),
+    reviewer_user_id        VARCHAR(100) REFERENCES users(user_id),
+
+    -- Presence flags (updated by comment/document service on each insert)
+    has_comments             BOOLEAN NOT NULL DEFAULT FALSE,
+    has_documents             BOOLEAN NOT NULL DEFAULT FALSE,
+
+    -- ── Workflow status (6-status FSM) ──────────────────────────
+    -- NOT_PREPARED  → admin validates → PREPARED
+    -- PREPARED      → preparer certifies → CERTIFIED
+    -- CERTIFIED     → approver approves → APPROVED (terminal)
+    --               → approver rejects  → REJECTED (preparer re-certifies)
+    --               → preparer decertifies → DECERTIFIED (preparer re-certifies)
+    -- REJECTED / DECERTIFIED → preparer certifies → CERTIFIED
+    status                   VARCHAR(50) NOT NULL DEFAULT 'NOT_PREPARED',
+    CONSTRAINT chk_jh_status CHECK (
+        status IN (
+            'NOT_PREPARED',
+            'PREPARED',
+            'CERTIFIED',
+            'APPROVED',
+            'REJECTED',
+            'DECERTIFIED'
+        )
+    ),
+
+    -- ── Lifecycle ──────────────────────────────────────────
+    is_active                BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by               VARCHAR(100) REFERENCES users(user_id),
+    created_at               TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at                TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    closed_at                TIMESTAMP WITH TIME ZONE,
+
+    UNIQUE(document_type, document_number, fiscal_year, batch_id, company_code, currency, ledger_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_jh_period
+    ON journal_header(journal_period);
+CREATE INDEX IF NOT EXISTS idx_jh_status
+    ON journal_header(status);
+CREATE INDEX IF NOT EXISTS idx_jh_period_status
+    ON journal_header(journal_period, status);
+CREATE INDEX IF NOT EXISTS idx_jh_company_code
+    ON journal_header(company_code);
+CREATE INDEX IF NOT EXISTS idx_jh_region
+    ON journal_header(region);
+CREATE INDEX IF NOT EXISTS idx_jh_source_file_id
+    ON journal_header(source_file_id);
+CREATE INDEX IF NOT EXISTS idx_jh_document_number
+    ON journal_header(document_number);
+CREATE INDEX IF NOT EXISTS idx_jh_preparer_user_id
+    ON journal_header(preparer_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_jh_approver_user_id
+    ON journal_header(approver_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_jh_reviewer_user_id
+    ON journal_header(reviewer_user_id);
+CREATE INDEX IF NOT EXISTS idx_jh_team_id
+    ON journal_header(team_id);
+CREATE INDEX IF NOT EXISTS idx_jh_baxter_id
+    ON journal_header(baxter_id);
+CREATE INDEX IF NOT EXISTS idx_jh_is_active
+    ON journal_header(is_active);
+CREATE INDEX IF NOT EXISTS idx_jh_created_at
+    ON journal_header(created_at DESC);
+
+-- =============================================================================
+-- 9.10  journal_line
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS journal_line (
+    id                  BIGSERIAL PRIMARY KEY,
+    journal_line_id     VARCHAR(100) UNIQUE NOT NULL,
+    journal_id          VARCHAR(100) NOT NULL REFERENCES journal_header(journal_id),
+    file_load_id        VARCHAR(100) NOT NULL REFERENCES journal_file_load(file_load_id),
+
+    -- ── From 27-col source file ──────────────────────────────────────────────
+    source_row_number   INTEGER NOT NULL,
+    je_line_number       INTEGER,
+    business_unit        VARCHAR(100),
+    object_account        VARCHAR(100),
+    subsidiary            VARCHAR(100),
+    subledger             VARCHAR(100),
+    subledger_type        VARCHAR(50),
+    amount                NUMERIC(18, 2) NOT NULL DEFAULT 0,
+    amount_usd            NUMERIC(18, 2) NOT NULL DEFAULT 0,
+    explanation_1         VARCHAR(500),
+    explanation_2         VARCHAR(500),
+    gl_post_status        VARCHAR(50),
+    asset_number          VARCHAR(100),
+    last_modified_by      VARCHAR(255),
+    account_description   VARCHAR(500),
+    preparer_adid         VARCHAR(100),           -- from source file col 10, for audit
+    region                VARCHAR(100),
+    raw_line              TEXT,                   -- original raw row for audit
+
+    -- ── Account-level metadata (Phase 2+ — from account master lookup) ────
+    account_number           VARCHAR(100),
+    account_manager           VARCHAR(255),
+    account_reviewer          VARCHAR(255),
+    account_managed_by_user   VARCHAR(255),
+    internal_auditor          VARCHAR(255),
+
+    -- ── Intercompany amounts (Phase 3+) ────────────────────────
+    amount_ic            NUMERIC(18, 2),         -- Amount I/C
+    amount_ic_jde         NUMERIC(18, 2),         -- Amount I/C JDE
+    gross_amount          NUMERIC(18, 2),
+    gross_amount_jde      NUMERIC(18, 2),
+    ic_line_reference     VARCHAR(255),           -- I/C Line Reference
+
+    -- ── Tax fields (Phase 3+) ─────────────────────────────────────
+    tax_amount            NUMERIC(18, 2),
+    tax_amount_jde        NUMERIC(18, 2),
+    tax_area              VARCHAR(100),
+    tax_expl               VARCHAR(100),
+    tax_rate               NUMERIC(10, 4),
+    taxable_amount         NUMERIC(18, 2),
+    non_taxable_amount     NUMERIC(18, 2),
+
+    -- ── Line-level currency (Phase 2+) ────────────────────────
+    line_company_code     VARCHAR(50),
+    line_currency          VARCHAR(10),
+    line_exchange_rate     NUMERIC(18, 8),
+    line_number            INTEGER,
+    sub_ledger              VARCHAR(100),
+    sub_ledger_type         VARCHAR(50),
+    reference_2             VARCHAR(255),           -- Reference 2 / Council ID
+
+    -- ── Workflow certification stamps ─────────────────────────
+    prepared_by_user       VARCHAR(255),
+    prepared_date           TIMESTAMP WITH TIME ZONE,
+    approved_by_user        VARCHAR(255),
+    approved_date            TIMESTAMP WITH TIME ZONE,
+    reviewed_by_user         VARCHAR(255),
+    reviewed_date            TIMESTAMP WITH TIME ZONE,
+
+    -- ── Lifecycle ──────────────────────────────────────────
+    is_selected              BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at               TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at                TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+
+    UNIQUE(journal_id, source_row_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_jl_journal_id
+    ON journal_line(journal_id);
+CREATE INDEX IF NOT EXISTS idx_jl_file_load_id
+    ON journal_line(file_load_id);
+CREATE INDEX IF NOT EXISTS idx_jl_business_unit
+    ON journal_line(business_unit);
+CREATE INDEX IF NOT EXISTS idx_jl_object_account
+    ON journal_line(object_account);
+
+-- =============================================================================
+-- 9.11  journal_assignment
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS journal_assignment (
+    id                BIGSERIAL PRIMARY KEY,
+    assignment_id     VARCHAR(100) UNIQUE NOT NULL,
+    journal_id        VARCHAR(100) NOT NULL REFERENCES journal_header(journal_id),
+    role_code         VARCHAR(50)  NOT NULL REFERENCES roles(role_code),
+    assigned_user_id  VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    sequence_number   INTEGER NOT NULL,
+    assignment_status VARCHAR(50) NOT NULL DEFAULT 'ASSIGNED',
+    -- Values: ASSIGNED | IN_PROGRESS | COMPLETED | REJECTED | SKIPPED | REOPENED
+    assigned_by       VARCHAR(100) REFERENCES users(user_id),
+    assigned_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    activated_at      TIMESTAMP WITH TIME ZONE,
+    started_at        TIMESTAMP WITH TIME ZONE,
+    completed_at      TIMESTAMP WITH TIME ZONE,
+    created_at        TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+
+    UNIQUE(journal_id, role_code),
+    UNIQUE(journal_id, sequence_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ja_user_role
+    ON journal_assignment(assigned_user_id, role_code, assignment_status);
+CREATE INDEX IF NOT EXISTS idx_ja_journal_id
+    ON journal_assignment(journal_id);
+CREATE INDEX IF NOT EXISTS idx_ja_assignment_status
+    ON journal_assignment(assignment_status);
+
+-- ── Segregation of duties ───────────────────────────────────────────────
+-- One person must never hold both the PREPARER and APPROVER assignment on the
+-- same journal: they could prepare it, switch to their approver role, and
+-- approve their own work.
+--
+-- This cannot be a CHECK constraint — the rule spans two rows of this table —
+-- so it is a trigger. jde_user_dependency_mapping already carries an equivalent
+-- CHECK (chk_jde_diff_user), but that only governs the default pairing used at
+-- upload time; a direct or corrected assignment bypassed it entirely.
+CREATE OR REPLACE FUNCTION enforce_assignment_sod()
+RETURNS TRIGGER AS $$
+DECLARE
+    conflicting_role VARCHAR(50);
+BEGIN
+    IF NEW.role_code NOT IN ('PREPARER', 'APPROVER') THEN
+        RETURN NEW;
+    END IF;
+
+    SELECT ja.role_code INTO conflicting_role
+    FROM journal_assignment ja
+    WHERE ja.journal_id       = NEW.journal_id
+      AND ja.assigned_user_id = NEW.assigned_user_id
+      AND ja.role_code        <> NEW.role_code
+      AND ja.role_code IN ('PREPARER', 'APPROVER')
+      AND ja.id               <> COALESCE(NEW.id, -1)
+    LIMIT 1;
+
+    IF conflicting_role IS NOT NULL THEN
+        RAISE EXCEPTION
+            'Segregation of duties: user % is already the % on journal % and cannot also be the %',
+            NEW.assigned_user_id, conflicting_role, NEW.journal_id, NEW.role_code
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_journal_assignment_sod ON journal_assignment;
+CREATE TRIGGER trg_journal_assignment_sod
+    BEFORE INSERT OR UPDATE ON journal_assignment
+    FOR EACH ROW EXECUTE FUNCTION enforce_assignment_sod();
+
+-- =============================================================================
+-- 9.12  journal_comment
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS journal_comment (
+    id           BIGSERIAL PRIMARY KEY,
+    comment_id   VARCHAR(100) UNIQUE NOT NULL,
+    journal_id   VARCHAR(100) NOT NULL REFERENCES journal_header(journal_id),
+    comment_text TEXT NOT NULL,
+    comment_type VARCHAR(50)  NOT NULL DEFAULT 'GENERAL',
+    -- Values: GENERAL | REJECTION | SYSTEM
+    role_code    VARCHAR(50)  NOT NULL REFERENCES roles(role_code),
+    created_by   VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    -- comment_text holds the CURRENT text. Editing overwrites it and appends a
+    -- row to journal_comment_history, so the live thread shows only the latest
+    -- wording while the full trail stays auditable.
+    is_edited    BOOLEAN      NOT NULL DEFAULT FALSE,
+    edited_at    TIMESTAMP WITH TIME ZONE,
+
+    -- The journal's FSM status when this comment was written.
+    --
+    -- A comment is editable only while the journal is STILL in that status. Once
+    -- the journal advances — certified, approved, rejected, decertified — the
+    -- comment becomes part of the record of a stage that has closed, and
+    -- rewording it afterwards would misrepresent what was said at the point of
+    -- the decision. Authorship alone is not a sufficient rule: a journal
+    -- rejected back to its preparer would otherwise let them rewrite the
+    -- comments the approver had already acted on.
+    journal_status_at_creation VARCHAR(50),
+    created_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_jcomment_journal_id
+    ON journal_comment(journal_id);
+CREATE INDEX IF NOT EXISTS idx_jcomment_created_by
+    ON journal_comment(created_by);
+
+-- =============================================================================
+-- 9.12b  journal_comment_history   (append-only audit trail for comments)
+-- =============================================================================
+-- One row per action. CREATE stores the original text as new_text with
+-- old_text NULL; EDIT stores both sides of the change.
+--
+-- performed_by_role is captured at the moment of the action, not read back from
+-- the user later: a user may hold several roles and switch between them, so the
+-- role that made the edit must be frozen into the record.
+--
+-- Append-only: never UPDATE or DELETE. This is the evidence the live thread
+-- deliberately hides.
+CREATE TABLE IF NOT EXISTS journal_comment_history (
+    id                       BIGSERIAL PRIMARY KEY,
+    history_id               VARCHAR(100) UNIQUE NOT NULL,
+    comment_id               VARCHAR(100) NOT NULL REFERENCES journal_comment(comment_id),
+    journal_id               VARCHAR(100) NOT NULL REFERENCES journal_header(journal_id),
+    action                   VARCHAR(20)  NOT NULL,
+    old_text                 TEXT,
+    new_text                 TEXT         NOT NULL,
+    performed_by             VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    performed_by_display_name VARCHAR(255),
+    performed_by_role        VARCHAR(50)  NOT NULL REFERENCES roles(role_code),
+    performed_at             TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    created_at               TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    -- NO updated_at — history rows are immutable
+    CONSTRAINT chk_jch_action CHECK (action IN ('CREATED', 'EDITED')),
+    -- A CREATED row has nothing before it; an EDITED row must record what it replaced.
+    CONSTRAINT chk_jch_old_text CHECK (
+        (action = 'CREATED' AND old_text IS NULL)
+        OR (action = 'EDITED' AND old_text IS NOT NULL)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_jchistory_journal_at
+    ON journal_comment_history(journal_id, performed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_jchistory_comment_id
+    ON journal_comment_history(comment_id);
+
+-- =============================================================================
+-- 9.13  journal_document
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS journal_document (
+    id                  BIGSERIAL PRIMARY KEY,
+    document_id         VARCHAR(100) UNIQUE NOT NULL,
+    journal_id          VARCHAR(100) NOT NULL REFERENCES journal_header(journal_id),
+    original_file_name  VARCHAR(500) NOT NULL,
+    file_extension      VARCHAR(50),
+    mime_type           VARCHAR(255),
+    file_size_bytes     BIGINT,
+    file_hash_sha256    VARCHAR(64),
+    file_content        BYTEA NOT NULL,         -- Phase 1: DB storage
+    s3_key              VARCHAR(1000),          -- Phase 2: S3 key (nullable)
+    description         TEXT,
+    uploaded_by         VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    uploaded_role       VARCHAR(50)  NOT NULL REFERENCES roles(role_code),
+    uploaded_at         TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    status              VARCHAR(50)  NOT NULL DEFAULT 'ACTIVE',
+    -- Values: ACTIVE only (no deletion ever)
+    created_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_jdoc_journal_id
+    ON journal_document(journal_id);
+CREATE INDEX IF NOT EXISTS idx_jdoc_uploaded_by
+    ON journal_document(uploaded_by);
+
+-- =============================================================================
+-- 9.14  journal_hyperlink
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS journal_hyperlink (
+    id           BIGSERIAL PRIMARY KEY,
+    hyperlink_id VARCHAR(100) UNIQUE NOT NULL,
+    journal_id   VARCHAR(100) NOT NULL REFERENCES journal_header(journal_id),
+    url          TEXT NOT NULL,
+    display_text VARCHAR(500),
+    description  TEXT,
+    added_by     VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    added_role   VARCHAR(50)  NOT NULL REFERENCES roles(role_code),
+    created_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_jhlink_journal_id
+    ON journal_hyperlink(journal_id);
+
+-- =============================================================================
+-- 9.15  journal_certification  (IMMUTABLE — no updated_at)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS journal_certification (
+    id                      BIGSERIAL PRIMARY KEY,
+    certification_id        VARCHAR(100) UNIQUE NOT NULL,
+    journal_id              VARCHAR(100) NOT NULL REFERENCES journal_header(journal_id),
+    assignment_id           VARCHAR(100) REFERENCES journal_assignment(assignment_id),
+    role_code               VARCHAR(50)  NOT NULL REFERENCES roles(role_code),
+    action                  VARCHAR(50)  NOT NULL,
+    -- Values: CERTIFY | REJECT | DECERTIFY | SYSTEM_CERTIFY
+    certification_status    VARCHAR(50)  NOT NULL,
+    -- Values: CERTIFIED | REJECTED | DECERTIFIED | SYSTEM_CERTIFIED | APPROVED
+    certification_statement TEXT,
+    comments                TEXT,
+    reason_code             VARCHAR(100) REFERENCES rejection_reason_master(reason_code),
+    rejection_reason_text   TEXT,
+    is_bulk                 BOOLEAN NOT NULL DEFAULT FALSE,
+    performed_by            VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    performed_at            TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    created_at              TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    -- NO updated_at — certification records are IMMUTABLE FOREVER
+);
+
+CREATE INDEX IF NOT EXISTS idx_jcert_journal_id
+    ON journal_certification(journal_id);
+CREATE INDEX IF NOT EXISTS idx_jcert_performed_by
+    ON journal_certification(performed_by);
+CREATE INDEX IF NOT EXISTS idx_jcert_role_action
+    ON journal_certification(role_code, action);
+CREATE INDEX IF NOT EXISTS idx_jcert_performed_at
+    ON journal_certification(performed_at DESC);
+
+-- =============================================================================
+-- 9.16  journal_audit_log  (IMMUTABLE — no updated_at)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS journal_audit_log (
+    id             BIGSERIAL PRIMARY KEY,
+    audit_id       VARCHAR(100) UNIQUE NOT NULL,
+    journal_id     VARCHAR(100) REFERENCES journal_header(journal_id),
+    file_load_id   VARCHAR(100) REFERENCES journal_file_load(file_load_id),
+    action_type    VARCHAR(100) NOT NULL,
+    -- e.g. FILE_UPLOADED, FILE_PARSED, JOURNAL_CREATED, ASSIGNMENT_CREATED,
+    --      PREPARER_CERTIFIED, APPROVER_CERTIFIED, APPROVER_REJECTED,
+    --      DECERTIFIED, CLOSED
+    old_status     VARCHAR(50),
+    new_status     VARCHAR(50),
+    performed_by   VARCHAR(100) REFERENCES users(user_id),
+    performed_role VARCHAR(50)  REFERENCES roles(role_code),
+    message        TEXT,
+    metadata_json  JSONB,
+    correlation_id VARCHAR(100),
+    created_at     TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    -- NO updated_at — audit records are IMMUTABLE FOREVER
+);
+
+CREATE INDEX IF NOT EXISTS idx_jal_journal_id
+    ON journal_audit_log(journal_id);
+CREATE INDEX IF NOT EXISTS idx_jal_file_load_id
+    ON journal_audit_log(file_load_id);
+CREATE INDEX IF NOT EXISTS idx_jal_action_type
+    ON journal_audit_log(action_type);
+CREATE INDEX IF NOT EXISTS idx_jal_performed_by
+    ON journal_audit_log(performed_by);
+CREATE INDEX IF NOT EXISTS idx_jal_created_at
+    ON journal_audit_log(created_at DESC);
+
+-- =============================================================================
+-- 9.19  certification_statement_config
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS certification_statement_config (
+    id             BIGSERIAL PRIMARY KEY,
+    statement_id   VARCHAR(100) UNIQUE NOT NULL,
+    role_code      VARCHAR(50)  NOT NULL REFERENCES roles(role_code),
+    statement_text TEXT NOT NULL,
+    policy_number  VARCHAR(100),
+    policy_url     TEXT,
+    is_active      BOOLEAN NOT NULL DEFAULT TRUE,
+    effective_from DATE,
+    effective_to   DATE,
+    created_at     TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+-- One active statement per role_code at a time (enforced at application layer)
+
+CREATE INDEX IF NOT EXISTS idx_csc_role_active
+    ON certification_statement_config(role_code, is_active);
+
+-- =============================================================================
+-- 9.20  notification_log
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS notification_log (
+    id                  BIGSERIAL PRIMARY KEY,
+    notification_id     VARCHAR(100) UNIQUE NOT NULL,
+    journal_id          VARCHAR(100) REFERENCES journal_header(journal_id),
+    recipient_user_id   VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    recipient_email     VARCHAR(255) NOT NULL,
+    notification_type   VARCHAR(100) NOT NULL,
+    -- Values: JOURNAL_ASSIGNED | PREPARER_CERTIFIED | APPROVER_CERTIFIED |
+    --         APPROVER_REJECTED | REVIEWER_REQUIRED
+    subject             VARCHAR(500),
+    body_text           TEXT,
+    status              VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+    -- Values: PENDING | SENT | READ | FAILED
+    sent_at             TIMESTAMP WITH TIME ZONE,
+    read_at             TIMESTAMP WITH TIME ZONE,
+    error_message       TEXT,
+    created_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_nl_recipient_user_id
+    ON notification_log(recipient_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_nl_status
+    ON notification_log(status);
+CREATE INDEX IF NOT EXISTS idx_nl_journal_id
+    ON notification_log(journal_id);
+
+-- =============================================================================
+-- 9.21  ai_session_log  (IMMUTABLE append-only audit — no updated_at)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS ai_session_log (
+    id            BIGSERIAL PRIMARY KEY,
+    session_id    VARCHAR(100) UNIQUE NOT NULL,
+    user_id       VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    request_type  VARCHAR(50)  NOT NULL,
+    -- Values: AI_FILTER | AI_EXPORT
+    user_query    TEXT NOT NULL,
+    parsed_result JSONB,
+    model_used    VARCHAR(100),
+    tokens_used   INTEGER,
+    latency_ms    INTEGER,
+    status        VARCHAR(50) NOT NULL DEFAULT 'SUCCESS',
+    -- Values: SUCCESS | ERROR | TIMEOUT
+    error_message TEXT,
+    created_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    -- NO updated_at — AI session log is immutable
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_log_user_id
+    ON ai_session_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_ai_log_request_type
+    ON ai_session_log(request_type);
+CREATE INDEX IF NOT EXISTS idx_ai_log_created_at
+    ON ai_session_log(created_at DESC);
+
+-- =============================================================================
+-- 9.22  app_config
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS app_config (
+    id           BIGSERIAL PRIMARY KEY,
+    config_key   VARCHAR(255) UNIQUE NOT NULL,
+    config_value TEXT NOT NULL,
+    config_type  VARCHAR(50) NOT NULL DEFAULT 'STRING',
+    -- Values: STRING | INTEGER | BOOLEAN | JSON
+    description  TEXT,
+    is_active    BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+-- (no dedicated indexes)
+
+-- =============================================================================
+-- 9.23  company_news  (confirmed from screenshots 1.03.45 AM, 1.06.25 AM)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS company_news (
+    id         BIGSERIAL PRIMARY KEY,
+    news_id    VARCHAR(100) UNIQUE NOT NULL,
+    news_date  DATE NOT NULL,
+    headline   VARCHAR(500) NOT NULL,
+    body_text  TEXT,
+    is_active  BOOLEAN NOT NULL DEFAULT TRUE,   -- soft-hide; never DELETE
+    created_by VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+-- Visible: all authenticated roles on Home > My Work > Company News card
+-- Edit:    BUSINESS_ADMIN, SYSTEM_ADMIN (Add News Item on Home Admin page)
+
+CREATE INDEX IF NOT EXISTS idx_company_news_date
+    ON company_news(news_date DESC, is_active);
+CREATE INDEX IF NOT EXISTS idx_company_news_created_by
+    ON company_news(created_by);
+
+-- =============================================================================
+-- 9.24  user_module_permission  (confirmed from screenshot 1.24.12 AM)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS user_module_permission (
+    id         BIGSERIAL PRIMARY KEY,
+    user_id    VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    role_code  VARCHAR(50)  NOT NULL REFERENCES roles(role_code),
+    module_code VARCHAR(50) NOT NULL,
+    -- Values: ACCOUNT | CONSOLIDATIONS | JOURNAL_DOCUMENT | MATCH |
+    --         TASK | VARIANCE_ANALYSIS | INTERCOMPANY
+    is_granted BOOLEAN NOT NULL DEFAULT FALSE,
+    granted_by VARCHAR(100) REFERENCES users(user_id),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(user_id, role_code, module_code)
+);
+-- Phase 1 note: only JOURNAL_DOCUMENT drives access control. Other module
+-- columns render as informational in the 16-role × 7-module grid.
+
+CREATE INDEX IF NOT EXISTS idx_ump_user_role
+    ON user_module_permission(user_id, role_code);
+CREATE INDEX IF NOT EXISTS idx_ump_module_granted
+    ON user_module_permission(module_code, is_granted);
+
+-- =============================================================================
+-- 9.25  dependent_validation  (confirmed from screenshots 1.06.47 AM, 1.07.14 AM)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS dependent_validation (
+    id                    BIGSERIAL PRIMARY KEY,
+    validation_id         VARCHAR(100) UNIQUE NOT NULL,
+    field_name            VARCHAR(255) NOT NULL,       -- Name column
+    field_value           VARCHAR(500) NOT NULL,       -- Value column
+    dependent_field_name  VARCHAR(255) NOT NULL,       -- Dependent Name column
+    dependent_field_value VARCHAR(500) NOT NULL,       -- Dependent Value column
+    is_deleted            BOOLEAN NOT NULL DEFAULT FALSE,  -- Deleted column (soft-delete)
+    source_system         VARCHAR(100) NOT NULL DEFAULT 'SEED',
+    source_file_name      VARCHAR(500),
+    created_by            VARCHAR(100) REFERENCES users(user_id),
+    created_at            TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at            TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+-- No hard DELETE — set is_deleted = TRUE to remove from active validation
+-- View: SYSTEM_ADMIN only (admin settings area, /admin/dependent-validation)
+
+CREATE INDEX IF NOT EXISTS idx_dv_field
+    ON dependent_validation(field_name, field_value, is_deleted);
+CREATE INDEX IF NOT EXISTS idx_dv_dependent_field
+    ON dependent_validation(dependent_field_name, dependent_field_value, is_deleted);
+
+-- =============================================================================
+-- 9.26  user_dashboard_config  (confirmed from screenshots 1.08.21 AM – 1.08.57 AM)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS user_dashboard_config (
+    id             BIGSERIAL PRIMARY KEY,
+    config_id      VARCHAR(100) UNIQUE NOT NULL,
+    user_id        VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    dashboard_name VARCHAR(255) NOT NULL DEFAULT 'My Dashboard',
+    is_default     BOOLEAN NOT NULL DEFAULT FALSE,  -- the active dashboard for this user
+    layout_json    JSONB NOT NULL,
+    -- Layout structure: [{card_key, x, y, w, h, visible}]
+    -- card_key values: company_news | recon_status | past_due_recs | task_cert_status |
+    --                  tasks_due | intercompany_cert_status | journal_cert_status |
+    --                  unreconciled_balance | prior_period_recs | open_adjustments
+    created_at     TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+-- One is_default = TRUE per user at a time (enforced at application layer)
+-- If no row exists for a user: serve the built-in 9-card default layout
+-- No deletion: set is_default = FALSE to switch to another layout
+
+CREATE INDEX IF NOT EXISTS idx_udc_user_id
+    ON user_dashboard_config(user_id, is_default);
+
+-- =============================================================================
+-- 9.27  role_capabilities  (required for /api/v1/config/role-permissions)
+-- =============================================================================
+-- Maps each role_code to the UI capabilities it is permitted to exercise.
+-- The frontend fetches this table via GET /api/v1/config/role-permissions
+-- (cached 10 min) to decide which action buttons to render on the certify page.
+-- Missing this table = no action buttons anywhere in the app.
+CREATE TABLE IF NOT EXISTS role_capabilities (
+    role_code   VARCHAR(50)  NOT NULL REFERENCES roles(role_code) ON DELETE CASCADE,
+    capability  VARCHAR(100) NOT NULL,
+    -- Capability values (must match frontend constants/rolePermissions.ts):
+    --   certify_as_preparer | certify_as_approver | add_comment | add_document
+    --   add_hyperlink | view_all_journals | upload_file | manage_users | decertify
+    --   validate_journal
+    -- validate_journal: admin moves NOT_PREPARED → PREPARED. Mirrors the
+    -- ADMIN_ROLES check in services/journal_service.validate_journal(), which
+    -- is the actual authority; the UI must not be stricter than the API.
+    is_active   BOOLEAN      NOT NULL DEFAULT TRUE,
+    created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (role_code, capability)
+);
+-- (no dedicated indexes — PK covers the lookup pattern)
+
+-- =============================================================================
+-- 9.28  user_dashboard_cards  (AI v2 — per-user custom dashboard cards)
+-- =============================================================================
+-- Stores built-in status cards and AI-created custom cards for each user.
+-- Built-in cards: is_default=TRUE, cannot be deleted, position is user-defined.
+-- Custom cards: is_default=FALSE, AI-created, user can delete.
+-- Card config_json for status cards: {"status": "REJECTED", "filters": {...}}
+-- Card config_json for custom: {"status": "...", "currency": "AUD", ...}
+CREATE TABLE IF NOT EXISTS user_dashboard_cards (
+    card_id      UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id      VARCHAR(50)  NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    card_type    VARCHAR(50)  NOT NULL CHECK (card_type IN ('status_count', 'custom')),
+    label        VARCHAR(100) NOT NULL,
+    icon         VARCHAR(50),
+    color        VARCHAR(20),
+    config_json  JSONB        NOT NULL DEFAULT '{}',
+    position     INTEGER      NOT NULL DEFAULT 0,
+    is_default   BOOLEAN      NOT NULL DEFAULT FALSE,
+    is_visible   BOOLEAN      NOT NULL DEFAULT TRUE,
+    created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+-- One set of default cards per user; position updated on drag-reorder
+-- If no cards exist for a user, the UI seeds the FSM defaults on first load
+
+CREATE INDEX IF NOT EXISTS idx_udc_cards_user_pos
+    ON user_dashboard_cards(user_id, position);
+CREATE INDEX IF NOT EXISTS idx_udc_cards_visible
+    ON user_dashboard_cards(user_id, is_visible);
+
+
+-- =============================================================================
+-- ══ MODULE: ACCOUNT RECONCILIATION (module 2 of 8) ══
+-- Per Docs/ArchitecturePlanV2.md Section 6 (spec) and Section 1.2 (module
+-- contract). Table prefix account_*. Mirrors journal_* conventions exactly:
+--   - Business-key FKs only (user_id, role_code, team_id, reconciliation_id,
+--     file_load_id) — never surrogate BIGSERIAL PKs across tables.
+--   - IF NOT EXISTS on every CREATE TABLE / CREATE INDEX.
+--   - Mutable tables: created_at + updated_at, both NOT NULL DEFAULT NOW().
+--   - Immutable tables (account_certification, account_audit_log,
+--     account_rule_evaluation_log): created_at only — no updated_at, no
+--     UPDATE/DELETE ever.
+--   - Soft-delete via is_active/status; no physical deletes anywhere.
+--   - account_rule / account_rule_evaluation_log follow the generic
+--     cross-module rule-engine pattern (Section 4), not a bespoke
+--     account_zero_balance_rule table — zero-balance auto-cert is rule #1.
+-- =============================================================================
+
+-- =============================================================================
+-- 10.1  account_file_load
+--       Mirrors journal_file_load. One uploaded Accounts text file = one batch.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS account_file_load (
+    id                      BIGSERIAL PRIMARY KEY,
+    file_load_id            VARCHAR(100) UNIQUE NOT NULL,
+    original_file_name      VARCHAR(500) NOT NULL,
+    file_extension          VARCHAR(50),
+    mime_type               VARCHAR(255),
+    file_size_bytes         BIGINT,
+    file_hash_sha256        VARCHAR(64),
+    file_content            BYTEA NOT NULL,
+    -- Parser configuration
+    source_type             VARCHAR(50)  NOT NULL DEFAULT 'MANUAL_UPLOAD',
+    delimiter               VARCHAR(20)  NOT NULL DEFAULT 'TAB',
+    expected_column_count   INTEGER      NOT NULL DEFAULT 25,
+    period_end_date         DATE,
+    -- Parse counters
+    total_rows              INTEGER      NOT NULL DEFAULT 0,
+    valid_rows              INTEGER      NOT NULL DEFAULT 0,
+    invalid_rows            INTEGER      NOT NULL DEFAULT 0,
+    accounts_created        INTEGER      NOT NULL DEFAULT 0,
+    system_certified_count  INTEGER      NOT NULL DEFAULT 0,
+    -- Lifecycle status: PENDING | UPLOADING | PARSING | PARSE_SUCCESS |
+    --                   PARSE_FAILED | ASSIGNMENT_FAILED
+    status                  VARCHAR(50)  NOT NULL DEFAULT 'PENDING',
+    error_message           TEXT,
+    parse_errors_json       JSONB,
+    uploaded_by             VARCHAR(100) REFERENCES users(user_id),
+    uploaded_role           VARCHAR(50)  REFERENCES roles(role_code),
+    uploaded_at             TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    processed_at            TIMESTAMPTZ,
+    created_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_afl_uploaded_by ON account_file_load(uploaded_by);
+CREATE INDEX IF NOT EXISTS idx_afl_status      ON account_file_load(status);
+CREATE INDEX IF NOT EXISTS idx_afl_uploaded_at  ON account_file_load(uploaded_at DESC);
+
+
+-- =============================================================================
+-- 10.2  account_reconciliation  (the reconciliation header — mirrors journal_header)
+--       One row per account per period. Lands in the System Admin queue after
+--       upload (NOT_ASSIGNED) unless zero-balance/no-activity, in which case
+--       it is auto-certified (SYSTEM_CERTIFIED). 7-status FSM.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS account_reconciliation (
+    id                      BIGSERIAL PRIMARY KEY,
+    reconciliation_id       VARCHAR(100) UNIQUE NOT NULL,
+    source_file_id          VARCHAR(100) NOT NULL REFERENCES account_file_load(file_load_id),
+
+    -- ── From Accounts import file (BL_Accounts_Import_Template, AR-03) ───────
+    entity_unique_id        VARCHAR(100) NOT NULL,
+    account_number          VARCHAR(100) NOT NULL,
+    key3                    VARCHAR(50),
+    key4                    VARCHAR(50),
+    key5                    VARCHAR(50),
+    key6                    VARCHAR(50),
+    key7                    VARCHAR(50),
+    key8                    VARCHAR(50),
+    key9                    VARCHAR(50),
+    key10                   VARCHAR(50),
+    account_description     VARCHAR(500),
+    account_reference       VARCHAR(50),
+    assignment_type         VARCHAR(10),                  -- 'A' = Account Reconciliation
+    account_type            VARCHAR(50),
+    active_account          BOOLEAN NOT NULL DEFAULT TRUE,
+    activity_in_period      BOOLEAN NOT NULL DEFAULT FALSE, -- auto-cert driver
+    alternate_currency      VARCHAR(10),                    -- raw file column; superseded by alternate_currency_display
+    account_currency        VARCHAR(10),
+    period_end_date         DATE NOT NULL,
+    period_label            VARCHAR(7),                     -- MM/YYYY (denormalized)
+
+    -- ── Balances ─────────────────────────────────────────────────────────────
+    gl_reporting_balance    NUMERIC(20, 2),
+    gl_alternate_balance    NUMERIC(20, 2),
+    gl_account_balance      NUMERIC(20, 2),                 -- nullable: a blank balance in the source file is a real business value ("null balance"), not a data error — the zero-balance rule's treat_null_as_zero predicate depends on being able to distinguish NULL from 0
+    gl_account_balance_usd  NUMERIC(20, 2),
+    bl_currency_rate_usd    NUMERIC(18, 8) DEFAULT 1,
+
+    -- ── Computed / Admin-set-once-at-assignment fields (ArchitecturePlanV2 §6.2–6.4) ──
+    account_name               VARCHAR(500),   -- computed at parse time: colA..colI joined with '-', blanks preserved as empty positions (decision log #6)
+    risk_rating                VARCHAR(20)  NOT NULL DEFAULT 'NONE',
+    reconciliation_frequency   VARCHAR(20)  NOT NULL DEFAULT 'MONTHLY',  -- stored/selectable now; not enforced until FREQUENCY_QUEUE_FILTER rule is activated (decision log #8)
+    alternate_currency_display VARCHAR(10)  NOT NULL DEFAULT 'USD',      -- always 'USD', sourced from app_config.account_alternate_currency_default, never the file's own column
+
+    -- ── Denormalized display / grouping ──────────────────────────────────────
+    company_code            VARCHAR(50),
+    region                   VARCHAR(100),
+    team_id                  VARCHAR(100) REFERENCES teams(team_id),   -- shared table, no new schema (decision log #9)
+    template                 VARCHAR(255) NOT NULL DEFAULT 'Account Reconciliation',
+    header_status_display    VARCHAR(255),
+    final_certification_state VARCHAR(100),
+    is_completed             BOOLEAN NOT NULL DEFAULT FALSE,
+
+    -- ── Assignment (populated by System Admin manually — account_admin_manual_assignment=true) ──
+    preparer_user_id         VARCHAR(100) REFERENCES users(user_id),
+    approver_user_id         VARCHAR(100) REFERENCES users(user_id),
+    reviewer_user_id         VARCHAR(100) REFERENCES users(user_id),
+
+    -- ── Presence flags (updated by item/comment/document services) ───────────
+    has_items                BOOLEAN NOT NULL DEFAULT FALSE,
+    has_comments             BOOLEAN NOT NULL DEFAULT FALSE,
+    has_documents             BOOLEAN NOT NULL DEFAULT FALSE,
+
+    -- ── Workflow status (7-status FSM, AR-04 §4.1–4.2) ────────────────────────
+    -- NOT_ASSIGNED     : parsed, sitting in SYSTEM_ADMIN queue (unassigned)
+    -- NOT_PREPARED     : admin assigned preparer+approver, awaiting preparer
+    -- PREPARED         : preparer certified, awaiting approver
+    -- APPROVED         : approver approved (terminal)
+    -- REJECTED         : approver rejected; preparer must re-certify
+    -- DECERTIFIED      : preparer retracted; preparer must re-certify
+    -- SYSTEM_CERTIFIED : zero-balance / no-activity auto-certification (terminal)
+    status                   VARCHAR(50) NOT NULL DEFAULT 'NOT_ASSIGNED',
+    is_zero_balance          BOOLEAN NOT NULL DEFAULT FALSE,
+    auto_cert_rule_id         VARCHAR(100),   -- account_rule.rule_id that fired, if any
+
+    CONSTRAINT chk_ar_status CHECK (
+        status IN (
+            'NOT_ASSIGNED','NOT_PREPARED','PREPARED','APPROVED',
+            'REJECTED','DECERTIFIED','SYSTEM_CERTIFIED'
+        )
+    ),
+    CONSTRAINT chk_ar_diff_user CHECK (
+        preparer_user_id IS NULL
+        OR approver_user_id IS NULL
+        OR preparer_user_id <> approver_user_id
+    ),
+    CONSTRAINT chk_ar_risk_rating CHECK (risk_rating IN ('NONE','LOW','MEDIUM','HIGH')),
+    CONSTRAINT chk_ar_frequency CHECK (reconciliation_frequency IN ('MONTHLY','QUARTERLY','ANNUAL')),
+
+    -- ── Lifecycle ────────────────────────────────────────────────────────────
+    is_active                BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by                VARCHAR(100) REFERENCES users(user_id),
+    created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    closed_at                 TIMESTAMPTZ,
+
+    -- One reconciliation per account per entity per period
+    UNIQUE(entity_unique_id, account_number, period_end_date, account_currency)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ar_period        ON account_reconciliation(period_label);
+CREATE INDEX IF NOT EXISTS idx_ar_status        ON account_reconciliation(status);
+CREATE INDEX IF NOT EXISTS idx_ar_period_status ON account_reconciliation(period_label, status);
+CREATE INDEX IF NOT EXISTS idx_ar_company       ON account_reconciliation(company_code);
+CREATE INDEX IF NOT EXISTS idx_ar_region        ON account_reconciliation(region);
+CREATE INDEX IF NOT EXISTS idx_ar_team          ON account_reconciliation(team_id);
+CREATE INDEX IF NOT EXISTS idx_ar_source_file   ON account_reconciliation(source_file_id);
+CREATE INDEX IF NOT EXISTS idx_ar_account_num   ON account_reconciliation(account_number);
+CREATE INDEX IF NOT EXISTS idx_ar_entity        ON account_reconciliation(entity_unique_id);
+CREATE INDEX IF NOT EXISTS idx_ar_preparer      ON account_reconciliation(preparer_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_ar_approver      ON account_reconciliation(approver_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_ar_zero_balance  ON account_reconciliation(is_zero_balance, status);
+CREATE INDEX IF NOT EXISTS idx_ar_active        ON account_reconciliation(is_active);
+CREATE INDEX IF NOT EXISTS idx_ar_created_at    ON account_reconciliation(created_at DESC);
+-- Fast SYSTEM_ADMIN unassigned queue
+CREATE INDEX IF NOT EXISTS idx_ar_admin_queue
+    ON account_reconciliation(status) WHERE status = 'NOT_ASSIGNED';
+
+
+-- =============================================================================
+-- 10.3  account_recon_item
+--       Items added by the Preparer (reconciling lines: description, amount,
+--       aging, etc.) — analogue of Journal Detail 'Items'.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS account_recon_item (
+    id                     BIGSERIAL PRIMARY KEY,
+    item_id                VARCHAR(100) UNIQUE NOT NULL,
+    reconciliation_id      VARCHAR(100) NOT NULL REFERENCES account_reconciliation(reconciliation_id),
+    line_number             INTEGER NOT NULL,
+    item_type               VARCHAR(50) NOT NULL DEFAULT 'RECONCILING_ITEM',
+    -- Values: RECONCILING_ITEM | ADJUSTMENT | SUPPORTING_BALANCE | OTHER
+    item_description         VARCHAR(1000),
+    item_reference           VARCHAR(255),
+    item_amount              NUMERIC(20, 2) NOT NULL DEFAULT 0,
+    item_amount_usd          NUMERIC(20, 2) NOT NULL DEFAULT 0,
+    item_currency            VARCHAR(10),
+    item_date                DATE,
+    aging_bucket             VARCHAR(50),   -- e.g. 0-30 | 31-60 | 61-90 | 90+
+    is_required_adjustment   BOOLEAN NOT NULL DEFAULT FALSE,
+    is_active                BOOLEAN NOT NULL DEFAULT TRUE,  -- soft-delete only
+    created_by                VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    created_role               VARCHAR(50)  NOT NULL REFERENCES roles(role_code),
+    created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(reconciliation_id, line_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ari_recon_id   ON account_recon_item(reconciliation_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_ari_created_by ON account_recon_item(created_by);
+
+
+-- =============================================================================
+-- 10.4  account_assignment  (mirrors journal_assignment)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS account_assignment (
+    id                 BIGSERIAL PRIMARY KEY,
+    assignment_id       VARCHAR(100) UNIQUE NOT NULL,
+    reconciliation_id   VARCHAR(100) NOT NULL REFERENCES account_reconciliation(reconciliation_id),
+    role_code           VARCHAR(50)  NOT NULL REFERENCES roles(role_code),
+    assigned_user_id     VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    sequence_number      INTEGER NOT NULL,
+    assignment_status    VARCHAR(50) NOT NULL DEFAULT 'ASSIGNED',
+    -- Values: ASSIGNED | IN_PROGRESS | COMPLETED | REJECTED | SKIPPED | REOPENED
+    assigned_by          VARCHAR(100) REFERENCES users(user_id),
+    assigned_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    activated_at          TIMESTAMPTZ,
+    started_at            TIMESTAMPTZ,
+    completed_at          TIMESTAMPTZ,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(reconciliation_id, role_code),
+    UNIQUE(reconciliation_id, sequence_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_aa_user_role ON account_assignment(assigned_user_id, role_code, assignment_status);
+CREATE INDEX IF NOT EXISTS idx_aa_recon_id  ON account_assignment(reconciliation_id);
+CREATE INDEX IF NOT EXISTS idx_aa_status    ON account_assignment(assignment_status);
+
+
+-- =============================================================================
+-- 10.5  account_comment  (mirrors journal_comment)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS account_comment (
+    id                        BIGSERIAL PRIMARY KEY,
+    comment_id                 VARCHAR(100) UNIQUE NOT NULL,
+    reconciliation_id           VARCHAR(100) NOT NULL REFERENCES account_reconciliation(reconciliation_id),
+    comment_text                TEXT NOT NULL,
+    comment_type                VARCHAR(50) NOT NULL DEFAULT 'GENERAL',
+    -- Values: GENERAL | REJECTION | SYSTEM
+    role_code                    VARCHAR(50)  NOT NULL REFERENCES roles(role_code),
+    created_by                   VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    is_edited                    BOOLEAN NOT NULL DEFAULT FALSE,
+    edited_at                    TIMESTAMPTZ,
+    recon_status_at_creation     VARCHAR(50),
+    created_at                   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at                   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ac_recon_id   ON account_comment(reconciliation_id);
+CREATE INDEX IF NOT EXISTS idx_ac_created_by ON account_comment(created_by);
+
+
+-- =============================================================================
+-- 10.6  account_document  (mirrors journal_document — supporting documents)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS account_document (
+    id                    BIGSERIAL PRIMARY KEY,
+    document_id             VARCHAR(100) UNIQUE NOT NULL,
+    reconciliation_id       VARCHAR(100) NOT NULL REFERENCES account_reconciliation(reconciliation_id),
+    original_file_name      VARCHAR(500) NOT NULL,
+    file_extension          VARCHAR(50),
+    mime_type               VARCHAR(255),
+    file_size_bytes         BIGINT,
+    file_hash_sha256        VARCHAR(64),
+    file_content            BYTEA NOT NULL,      -- Phase 1: DB storage
+    s3_key                  VARCHAR(1000),        -- Phase 2: S3 (nullable)
+    description              TEXT,
+    is_validation_source     BOOLEAN NOT NULL DEFAULT FALSE,  -- AI Excel-vs-screen validator source flag
+    uploaded_by              VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    uploaded_role            VARCHAR(50)  NOT NULL REFERENCES roles(role_code),
+    uploaded_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    status                   VARCHAR(50)  NOT NULL DEFAULT 'ACTIVE',  -- ACTIVE only, no delete
+    created_at               TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at               TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ad_recon_id    ON account_document(reconciliation_id);
+CREATE INDEX IF NOT EXISTS idx_ad_uploaded_by ON account_document(uploaded_by);
+CREATE INDEX IF NOT EXISTS idx_ad_validation  ON account_document(reconciliation_id, is_validation_source);
+
+
+-- =============================================================================
+-- 10.7  account_hyperlink  (mirrors journal_hyperlink)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS account_hyperlink (
+    id                  BIGSERIAL PRIMARY KEY,
+    hyperlink_id          VARCHAR(100) UNIQUE NOT NULL,
+    reconciliation_id     VARCHAR(100) NOT NULL REFERENCES account_reconciliation(reconciliation_id),
+    url                    TEXT NOT NULL,
+    display_text            VARCHAR(500),
+    description              TEXT,
+    added_by                 VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    added_role               VARCHAR(50)  NOT NULL REFERENCES roles(role_code),
+    created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at                TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ah_recon_id ON account_hyperlink(reconciliation_id);
+
+
+-- =============================================================================
+-- 10.8  account_certification  (IMMUTABLE — mirrors journal_certification)
+--       Records every certify/approve/reject/decertify AND the zero-balance
+--       SYSTEM_CERTIFY action. Reuses rejection_reason_master + statement config.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS account_certification (
+    id                       BIGSERIAL PRIMARY KEY,
+    certification_id          VARCHAR(100) UNIQUE NOT NULL,
+    reconciliation_id          VARCHAR(100) NOT NULL REFERENCES account_reconciliation(reconciliation_id),
+    assignment_id              VARCHAR(100) REFERENCES account_assignment(assignment_id),
+    role_code                  VARCHAR(50)  NOT NULL REFERENCES roles(role_code),
+    action                     VARCHAR(50)  NOT NULL,
+    -- Values: CERTIFY | APPROVE | REJECT | DECERTIFY | SYSTEM_CERTIFY
+    certification_status       VARCHAR(50)  NOT NULL,
+    -- Values: PREPARED | APPROVED | REJECTED | DECERTIFIED | SYSTEM_CERTIFIED
+    certification_statement    TEXT,
+    comments                   TEXT,
+    reason_code                 VARCHAR(100) REFERENCES rejection_reason_master(reason_code),
+    rejection_reason_text       TEXT,
+    is_system                   BOOLEAN NOT NULL DEFAULT FALSE,  -- TRUE for SYSTEM_CERTIFY
+    is_bulk                     BOOLEAN NOT NULL DEFAULT FALSE,
+    performed_by                 VARCHAR(100) REFERENCES users(user_id),  -- NULL when system
+    performed_by_display         VARCHAR(255),                            -- 'System' when auto
+    performed_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at                    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    -- NO updated_at — certification records are IMMUTABLE FOREVER
+);
+
+CREATE INDEX IF NOT EXISTS idx_acert_recon_id    ON account_certification(reconciliation_id);
+CREATE INDEX IF NOT EXISTS idx_acert_performed   ON account_certification(performed_by);
+CREATE INDEX IF NOT EXISTS idx_acert_role_action ON account_certification(role_code, action);
+CREATE INDEX IF NOT EXISTS idx_acert_at          ON account_certification(performed_at DESC);
+
+
+-- =============================================================================
+-- 10.9  account_audit_log  (IMMUTABLE — mirrors journal_audit_log)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS account_audit_log (
+    id                BIGSERIAL PRIMARY KEY,
+    audit_id            VARCHAR(100) UNIQUE NOT NULL,
+    reconciliation_id    VARCHAR(100) REFERENCES account_reconciliation(reconciliation_id),
+    file_load_id          VARCHAR(100) REFERENCES account_file_load(file_load_id),
+    action_type            VARCHAR(100) NOT NULL,
+    -- e.g. FILE_UPLOADED, FILE_PARSED, RECON_CREATED, ZERO_BALANCE_SYSTEM_CERTIFIED,
+    --      ASSIGNMENT_CREATED, PREPARER_CERTIFIED, APPROVER_APPROVED,
+    --      APPROVER_REJECTED, DECERTIFIED, ITEM_ADDED, DOCUMENT_ADDED,
+    --      AI_VALIDATION_RUN, CLOSED
+    old_status              VARCHAR(50),
+    new_status               VARCHAR(50),
+    performed_by              VARCHAR(100) REFERENCES users(user_id),
+    performed_role            VARCHAR(50)  REFERENCES roles(role_code),
+    message                   TEXT,
+    metadata_json              JSONB,
+    correlation_id             VARCHAR(100),
+    created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    -- NO updated_at — audit records are IMMUTABLE FOREVER
+);
+
+CREATE INDEX IF NOT EXISTS idx_aal_recon_id     ON account_audit_log(reconciliation_id);
+CREATE INDEX IF NOT EXISTS idx_aal_file_load    ON account_audit_log(file_load_id);
+CREATE INDEX IF NOT EXISTS idx_aal_action_type  ON account_audit_log(action_type);
+CREATE INDEX IF NOT EXISTS idx_aal_performed_by ON account_audit_log(performed_by);
+CREATE INDEX IF NOT EXISTS idx_aal_created_at   ON account_audit_log(created_at DESC);
+
+
+-- =============================================================================
+-- 10.10  account_rule / 10.11 account_rule_evaluation_log
+--        Generic cross-module business-rule pattern (ArchitecturePlanV2 §4).
+--        Zero-balance auto-cert (rule_id=ZERO_BAL_NO_ACTIVITY, rule_type=
+--        ZERO_BALANCE_AUTO_CERT) is rule #1, proving the pattern — NOT a
+--        bespoke account_zero_balance_rule table. Predicate config for a
+--        given rule_type lives in scope_json, e.g.
+--        {"require_zero_balance":true,"treat_null_as_zero":true,
+--         "require_no_activity":true,"zero_tolerance":0,
+--         "applies_to_assignment_type":"A"}.
+--        Future rules (FREQUENCY_QUEUE_FILTER, or any module 3-8 rule) are
+--        added as rows + a small evaluator function — never a new table.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS account_rule (
+    id               BIGSERIAL PRIMARY KEY,
+    rule_id            VARCHAR(100) UNIQUE NOT NULL,
+    rule_type           VARCHAR(100) NOT NULL,   -- e.g. 'ZERO_BALANCE_AUTO_CERT', 'FREQUENCY_QUEUE_FILTER'
+    rule_name            VARCHAR(255) NOT NULL,
+    description           TEXT,
+    scope_json            JSONB,                   -- {"roles":[...],"pages":[...],"company_codes":[...], <predicate config>}
+    is_active             BOOLEAN NOT NULL DEFAULT TRUE,
+    effective_from         DATE,
+    effective_to           DATE,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_arule_type   ON account_rule(rule_type, is_active);
+CREATE INDEX IF NOT EXISTS idx_arule_active ON account_rule(is_active);
+
+CREATE TABLE IF NOT EXISTS account_rule_evaluation_log (
+    id             BIGSERIAL PRIMARY KEY,
+    eval_id          VARCHAR(100) UNIQUE NOT NULL,
+    rule_id           VARCHAR(100) NOT NULL REFERENCES account_rule(rule_id),
+    record_ref         VARCHAR(100) NOT NULL,   -- the reconciliation_id the rule fired on
+    outcome             VARCHAR(50)  NOT NULL,   -- e.g. 'SYSTEM_CERTIFIED', 'SKIPPED', 'FLAGGED'
+    detail_json          JSONB,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    -- NO updated_at — evaluation log records are IMMUTABLE FOREVER
+);
+
+CREATE INDEX IF NOT EXISTS idx_arel_rule_id    ON account_rule_evaluation_log(rule_id);
+CREATE INDEX IF NOT EXISTS idx_arel_record_ref ON account_rule_evaluation_log(record_ref);
+CREATE INDEX IF NOT EXISTS idx_arel_created_at ON account_rule_evaluation_log(created_at DESC);
+
+-- =============================================================================
+-- Verification:
+--   SELECT table_name FROM information_schema.tables
+--    WHERE table_name LIKE 'account_%' ORDER BY table_name;
+-- Expected 11 tables:
+--   account_assignment, account_audit_log, account_certification,
+--   account_comment, account_document, account_file_load, account_hyperlink,
+--   account_recon_item, account_reconciliation, account_rule,
+--   account_rule_evaluation_log
+-- =============================================================================
+
+
+-- =============================================================================
+-- 10.12  ai_validation_log  (IMMUTABLE append-only audit, alongside ai_session_log)
+--        AI Excel-vs-Screen Discrepancy Validation -- used on BOTH the Journal
+--        Details page and the Account Reconciliation Details page. Per
+--        ArchitecturePlanV2.md Section 5.2: NOT a new AI subsystem -- two more
+--        tools (compare_uploaded_file, highlight_discrepancy) folded into the
+--        existing agent tool-use loop. context_type discriminates JOURNAL vs
+--        ACCOUNT so one table serves both detail pages.
+--        DATA GOVERNANCE: the AI never mutates financial data and never
+--        receives raw ledgers -- all arithmetic/normalisation happens
+--        server-side (Decimal, tolerance from app_config); the model receives
+--        only minimized, already-computed discrepancy descriptors.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS ai_validation_log (
+    id                  BIGSERIAL PRIMARY KEY,
+    validation_id       VARCHAR(100) UNIQUE NOT NULL,
+
+    -- What was validated
+    context_type        VARCHAR(50) NOT NULL,   -- JOURNAL | ACCOUNT
+    context_id          VARCHAR(100) NOT NULL,  -- journal_id or reconciliation_id
+
+    -- Source of the "truth" file the user uploaded to be checked
+    source_document_id  VARCHAR(100),           -- journal_document.document_id OR account_document.document_id
+    source_file_name    VARCHAR(500),
+    source_file_hash    VARCHAR(64),
+
+    -- AI request/response metadata (NO raw financial values persisted here)
+    requested_by        VARCHAR(100) NOT NULL REFERENCES users(user_id),
+    requested_role      VARCHAR(50)  REFERENCES roles(role_code),
+    model_used          VARCHAR(100),
+    tokens_used         INTEGER,
+    latency_ms          INTEGER,
+
+    -- Result summary (arithmetic done server-side, AI classifies only)
+    rows_compared       INTEGER NOT NULL DEFAULT 0,
+    fields_compared     INTEGER NOT NULL DEFAULT 0,
+    match_count         INTEGER NOT NULL DEFAULT 0,
+    discrepancy_count   INTEGER NOT NULL DEFAULT 0,
+    result_status       VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+    -- Values: PENDING | MATCH | DISCREPANCIES_FOUND | ERROR | TIMEOUT | DECLINED
+
+    -- Structured, minimized discrepancy payload for UI rendering:
+    -- [{ field, screen_value, file_value, row_ref, severity, note }]
+    discrepancies_json  JSONB,
+    error_message       TEXT,
+
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    -- NO updated_at -- immutable, like ai_session_log
+);
+
+CREATE INDEX IF NOT EXISTS idx_aiv_context      ON ai_validation_log(context_type, context_id);
+CREATE INDEX IF NOT EXISTS idx_aiv_requested_by ON ai_validation_log(requested_by);
+CREATE INDEX IF NOT EXISTS idx_aiv_result       ON ai_validation_log(result_status);
+CREATE INDEX IF NOT EXISTS idx_aiv_created_at   ON ai_validation_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_aiv_source_doc   ON ai_validation_log(source_document_id);
+
+-- =============================================================================
+-- Verification:
+--   SELECT column_name FROM information_schema.columns
+--    WHERE table_name = 'ai_validation_log' ORDER BY ordinal_position;
+-- =============================================================================
+
