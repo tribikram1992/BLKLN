@@ -1,0 +1,2071 @@
+-- =============================================================================
+-- FILE: 01_roles.sql
+-- =============================================================================
+-- =============================================================================
+-- Seed: 01_roles.sql
+-- All 16 application roles as defined in Architecture Section 14.1 / Section 4,
+-- plus 1 internal system actor role (SYSTEM) used only for immutable
+-- system-performed records (account_certification, account_audit_log, etc.).
+-- SYSTEM is never granted to a user via user_roles and never appears in any
+-- user-facing role picker -- it exists solely to satisfy the roles(role_code)
+-- FK on rows where is_system=TRUE / performed_by=NULL (e.g. zero-balance
+-- auto-certification, spec 8.4).
+-- Idempotent: ON CONFLICT (role_code) DO UPDATE so re-runs are safe.
+-- =============================================================================
+
+INSERT INTO roles (role_code, role_name, ui_display_name, is_active, created_at, updated_at) VALUES
+    ('SYSTEM',             'System',             'System',             TRUE, NOW(), NOW()),
+    ('PREPARER',           'Preparer',           'Preparer',           TRUE, NOW(), NOW()),
+    ('APPROVER',           'Approver',           'Approver',           TRUE, NOW(), NOW()),
+    ('REVIEWER',           'Reviewer',           'Reviewer',           TRUE, NOW(), NOW()),
+    ('FINANCIAL_REVIEWER', 'Financial Reviewer', 'Financial Reviewer', TRUE, NOW(), NOW()),
+    ('ACCOUNT_REVIEWER',   'Account Reviewer',   'Account Reviewer',   TRUE, NOW(), NOW()),
+    ('FINANCIAL_MANAGER',  'Financial Manager',  'Financial Manager',  TRUE, NOW(), NOW()),
+    ('ACCOUNT_MANAGER',    'Account Manager',    'Account Manager',    TRUE, NOW(), NOW()),
+    ('INTERNAL_AUDITOR',   'Internal Auditor',   'Internal Auditor',   TRUE, NOW(), NOW()),
+    ('EXECUTIVE',          'Executive',          'Executive',          TRUE, NOW(), NOW()),
+    ('CFO',                'CFO',                'CFO',                TRUE, NOW(), NOW()),
+    ('EXTERNAL_AUDITOR',   'External Auditor',   'External Auditor',   TRUE, NOW(), NOW()),
+    ('LOCAL_ADMIN',        'Local Admin',        'Local Admin',        TRUE, NOW(), NOW()),
+    ('BUSINESS_ADMIN',     'Business Admin',     'Business Admin',     TRUE, NOW(), NOW()),
+    ('SYSTEM_ADMIN',       'System Admin',       'System Admin',       TRUE, NOW(), NOW()),
+    ('CONSULTANT',         'Consultant',         'Consultant',         TRUE, NOW(), NOW()),
+    ('API_ACCESS',         'API Access',         'API Access',         TRUE, NOW(), NOW())
+ON CONFLICT (role_code) DO UPDATE
+    SET role_name      = EXCLUDED.role_name,
+        ui_display_name = EXCLUDED.ui_display_name,
+        is_active      = EXCLUDED.is_active,
+        updated_at     = NOW();
+
+
+
+-- =============================================================================
+-- FILE: 02_users.sql
+-- =============================================================================
+-- =============================================================================
+-- Seed: 02_users.sql
+-- Demo users — all passwords are bcrypt(cost=12) of "demopoc123".
+--
+-- Test accounts are named neutrally (testuser1..4) on purpose. They previously
+-- carried role-shaped names ("Preparer Demo", "Demo Approver"), which became
+-- actively misleading once accounts started holding more than one role: a user
+-- called "Preparer Demo" is the APPROVER on half the fixture journals. The
+-- name must not imply the seat.
+--
+--   testuser1 (USR-PREP-001)  PREPARER + APPROVER   dual-role
+--   testuser2 (USR-APPR-001)  PREPARER + APPROVER   dual-role
+--   testuser3 (USR-PREP-002)  PREPARER              single-role control
+--   testuser4 (USR-APPR-002)  APPROVER              single-role control
+--   localadmin  (USR-LADM-001)  LOCAL_ADMIN + PREPARER
+--   systemadmin (USR-SYSA-001)  SYSTEM_ADMIN
+--
+-- user_id values are deliberately unchanged. They are referenced by
+-- journal_assignment, journal_certification, journal_audit_log and others;
+-- renaming the identity in place keeps every foreign key intact. The USR-PREP /
+-- USR-APPR prefixes are now historical and carry no meaning.
+--
+-- Idempotent: ON CONFLICT (user_id) DO UPDATE, so re-running renames existing
+-- rows rather than failing on the unique username/adid/email constraints.
+-- =============================================================================
+
+INSERT INTO users (
+    user_id,
+    adid,
+    username,
+    display_name,
+    first_name,
+    last_name,
+    email,
+    password_hash,
+    auth_provider,
+    is_active,
+    created_at,
+    updated_at
+) VALUES
+    (
+        'USR-PREP-001',
+        'TESTUSER1',
+        'testuser1',
+        'Test User 1',
+        'Test',
+        'User 1',
+        'testuser1@baxter.com',
+        '$2b$12$LbYlhDE/wgCxEx57okaY5OYhzXyNFGWCaZAIFDf1czr.GqQiK5gnG',
+        'LOCAL',
+        TRUE,
+        NOW(),
+        NOW()
+    ),
+    (
+        'USR-APPR-001',
+        'TESTUSER2',
+        'testuser2',
+        'Test User 2',
+        'Test',
+        'User 2',
+        'testuser2@baxter.com',
+        '$2b$12$LbYlhDE/wgCxEx57okaY5OYhzXyNFGWCaZAIFDf1czr.GqQiK5gnG',
+        'LOCAL',
+        TRUE,
+        NOW(),
+        NOW()
+    ),
+    (
+        'USR-PREP-002',
+        'TESTUSER3',
+        'testuser3',
+        'Test User 3',
+        'Test',
+        'User 3',
+        'testuser3@baxter.com',
+        '$2b$12$LbYlhDE/wgCxEx57okaY5OYhzXyNFGWCaZAIFDf1czr.GqQiK5gnG',
+        'LOCAL',
+        TRUE,
+        NOW(),
+        NOW()
+    ),
+    (
+        'USR-APPR-002',
+        'TESTUSER4',
+        'testuser4',
+        'Test User 4',
+        'Test',
+        'User 4',
+        'testuser4@baxter.com',
+        '$2b$12$LbYlhDE/wgCxEx57okaY5OYhzXyNFGWCaZAIFDf1czr.GqQiK5gnG',
+        'LOCAL',
+        TRUE,
+        NOW(),
+        NOW()
+    ),
+    (
+        'USR-LADM-001',
+        'LOCALADMIN',
+        'localadmin',
+        'Local Admin',
+        'Local',
+        'Admin',
+        'localadmin@baxter.com',
+        '$2b$12$LbYlhDE/wgCxEx57okaY5OYhzXyNFGWCaZAIFDf1czr.GqQiK5gnG',
+        'LOCAL',
+        TRUE,
+        NOW(),
+        NOW()
+    ),
+    (
+        'USR-SYSA-001',
+        'SYSTEMADMIN',
+        'systemadmin',
+        'System Admin',
+        'System',
+        'Admin',
+        'systemadmin@baxter.com',
+        '$2b$12$LbYlhDE/wgCxEx57okaY5OYhzXyNFGWCaZAIFDf1czr.GqQiK5gnG',
+        'LOCAL',
+        TRUE,
+        NOW(),
+        NOW()
+    )
+ON CONFLICT (user_id) DO UPDATE
+    SET username      = EXCLUDED.username,
+        adid          = EXCLUDED.adid,
+        display_name  = EXCLUDED.display_name,
+        first_name    = EXCLUDED.first_name,
+        last_name     = EXCLUDED.last_name,
+        email         = EXCLUDED.email,
+        password_hash = EXCLUDED.password_hash,
+        is_active     = EXCLUDED.is_active,
+        updated_at    = NOW();
+
+
+
+-- =============================================================================
+-- FILE: 03_user_roles.sql
+-- =============================================================================
+-- =============================================================================
+-- Seed: 03_user_roles.sql
+-- User-role assignments.
+--
+--   testuser1   → PREPARER + APPROVER   dual-role
+--   testuser2   → PREPARER + APPROVER   dual-role
+--   testuser3   → PREPARER              single-role control
+--   testuser4   → APPROVER              single-role control
+--   localadmin  → LOCAL_ADMIN + PREPARER
+--   systemadmin → SYSTEM_ADMIN
+--
+-- testuser1 and testuser2 hold both journal roles because the fixture assigns
+-- them opposite seats on different journals (14_test_journals.sql): testuser1
+-- prepares TJ-A* and approves TJ-S*, testuser2 the mirror image. That is what
+-- makes "scoped by (user, active role)" distinguishable from "scoped by user" —
+-- with single-role accounts the two readings are indistinguishable.
+--
+-- localadmin additionally holds PREPARER so the role switcher can be exercised
+-- across an admin/non-admin boundary: /admin must close while acting as
+-- PREPARER even though the same person holds LOCAL_ADMIN.
+--
+-- Depends on: 01_roles.sql, 02_users.sql
+-- Idempotent: ON CONFLICT (user_id, role_code) DO NOTHING.
+-- =============================================================================
+
+INSERT INTO user_roles (user_id, role_code, is_active, created_at)
+SELECT
+    u.user_id,
+    mapping.role_code,
+    TRUE,
+    NOW()
+FROM (
+    VALUES
+        ('testuser1',   'PREPARER'),
+        ('testuser1',   'APPROVER'),
+        ('testuser2',   'PREPARER'),
+        ('testuser2',   'APPROVER'),
+        ('testuser3',   'PREPARER'),
+        ('testuser4',   'APPROVER'),
+        ('localadmin',  'LOCAL_ADMIN'),
+        ('localadmin',  'PREPARER'),
+        ('systemadmin', 'SYSTEM_ADMIN')
+) AS mapping(username, role_code)
+JOIN users u ON u.username = mapping.username
+ON CONFLICT (user_id, role_code) DO NOTHING;
+
+-- Remove role grants from the retired identities (preparer/approver/
+-- demopreparer/demoapprover). The user rows were renamed in place, so any role
+-- they picked up under the old names would otherwise persist.
+DELETE FROM user_roles ur
+USING users u
+WHERE ur.user_id = u.user_id
+  AND u.username IN ('testuser3', 'testuser4')
+  AND ur.role_code NOT IN (
+      SELECT m.role_code FROM (
+          VALUES ('testuser3', 'PREPARER'), ('testuser4', 'APPROVER')
+      ) AS m(username, role_code)
+      WHERE m.username = u.username
+  );
+
+
+
+-- =============================================================================
+-- FILE: 04_teams.sql
+-- =============================================================================
+-- =============================================================================
+-- Seed: 04_teams.sql
+-- Seed one pilot team as defined in Architecture Section 14.4.
+-- Idempotent: ON CONFLICT (team_id) DO NOTHING.
+--
+-- The id here is load-bearing, not cosmetic. 08_dependency_mapping.sql and
+-- 14_test_journals.sql both write team_id = 'TEAM-EMEA-001' against a foreign
+-- key into this table, so seeding any other id makes BOTH of those files fail
+-- on a fresh database -- which is exactly what happened while this file said
+-- 'TEAM-APAC-001'. The live database was built by hand and had EMEA, so the
+-- breakage only ever showed on a clean deploy, never in development.
+--
+-- 'region' on journal_header is a separate, per-journal column; APAC test
+-- journals belonging to this team is expected and not a contradiction.
+-- =============================================================================
+
+INSERT INTO teams (team_id, team_name, description, is_active, created_at, updated_at)
+VALUES (
+    'TEAM-EMEA-001',
+    'EMEA Finance',
+    'EMEA Finance team - primary pilot group for Journal Certification Phase 1',
+    TRUE,
+    NOW(),
+    NOW()
+)
+ON CONFLICT (team_id) DO NOTHING;
+
+
+
+-- =============================================================================
+-- FILE: 05_rejection_reasons.sql
+-- =============================================================================
+-- =============================================================================
+-- Seed: 05_rejection_reasons.sql
+-- Standard rejection reason codes as defined in Architecture Section 14.5.
+-- Idempotent: ON CONFLICT (reason_code) DO UPDATE.
+-- =============================================================================
+
+INSERT INTO rejection_reason_master (reason_code, reason_text, is_active, created_at, updated_at)
+VALUES
+    ('MISSING_SUPPORT',      'Missing supporting documentation',      TRUE, NOW(), NOW()),
+    ('INCORRECT_AMOUNT',     'Incorrect amount',                      TRUE, NOW(), NOW()),
+    ('INCORRECT_ACCOUNT',    'Incorrect account',                     TRUE, NOW(), NOW()),
+    ('INSUFFICIENT_COMMENT', 'Insufficient comment / explanation',    TRUE, NOW(), NOW()),
+    ('OTHER',                'Other',                                 TRUE, NOW(), NOW())
+ON CONFLICT (reason_code) DO UPDATE
+    SET reason_text = EXCLUDED.reason_text,
+        is_active   = EXCLUDED.is_active,
+        updated_at  = NOW();
+
+
+
+-- =============================================================================
+-- FILE: 06_cert_statement_config.sql
+-- =============================================================================
+-- =============================================================================
+-- Seed: 06_cert_statement_config.sql
+-- Certification statement text per role as defined in Architecture Section 14.6.
+-- Table: cert_statement_config
+-- Columns: id, statement_id, role_code, statement_text, policy_number, policy_url, is_active
+-- Idempotent: ON CONFLICT (statement_id) DO UPDATE.
+-- =============================================================================
+
+INSERT INTO certification_statement_config (
+    statement_id,
+    role_code,
+    statement_text,
+    policy_number,
+    policy_url,
+    is_active
+) VALUES
+    (
+        'STMT-PREP-001',
+        'PREPARER',
+        'I certify that the appropriate approvers have been assigned to this journal and that supporting documentation has been prepared in accordance with company policy 1105B.',
+        '1105B',
+        'https://baxter.sharepoint.com/policies/1105B',
+        TRUE
+    ),
+    (
+        'STMT-APPR-001',
+        'APPROVER',
+        'I have reviewed this journal entry and the supporting documentation and certify that it is accurate and complete in accordance with company policy 1105B.',
+        '1105B',
+        'https://baxter.sharepoint.com/policies/1105B',
+        TRUE
+    )
+ON CONFLICT (statement_id) DO UPDATE
+    SET role_code      = EXCLUDED.role_code,
+        statement_text = EXCLUDED.statement_text,
+        policy_number  = EXCLUDED.policy_number,
+        policy_url     = EXCLUDED.policy_url,
+        is_active      = EXCLUDED.is_active;
+
+
+-- =============================================================================
+-- FILE: 08_dependency_mapping.sql
+-- =============================================================================
+-- =============================================================================
+-- Seed: 08_dependency_mapping.sql
+-- Maps preparer ADID to default approver ADID at journal upload time.
+-- Used by parsers/assignment_resolver.py.
+--   PREPARER → APPROVER  (covers all demo/test journals including APAC)
+-- Depends on: 02_users.sql (ADIDs: PREPARER, APPROVER), 04_teams.sql
+-- Idempotent: ON CONFLICT (dependency_id) DO UPDATE.
+-- =============================================================================
+
+INSERT INTO jde_user_dependency_mapping (
+    dependency_id,
+    preparer_adid,
+    preparer_user_id,
+    preparer_role_code,
+    approver_adid,
+    approver_user_id,
+    approver_role_code,
+    team_id,
+    effective_from,
+    source_system,
+    is_active,
+    created_at,
+    updated_at
+)
+SELECT
+    mapping.dependency_id,
+    mapping.preparer_adid,
+    prep.user_id,
+    'BLPREPARER',
+    mapping.approver_adid,
+    appr.user_id,
+    'BLAPPROVER',
+    'TEAM-EMEA-001',
+    CURRENT_DATE,
+    'JDE',
+    TRUE,
+    NOW(),
+    NOW()
+FROM (
+    VALUES
+        -- Dual-role pair: testuser1 prepares for testuser2 by default, and the
+        -- fixture also assigns them the opposite seats on other journals.
+        ('DEP-001', 'TESTUSER1', 'TESTUSER2'),
+        -- Single-role control pair, disjoint from the above. Nothing prepared
+        -- by testuser3 is ever visible to testuser1, in either seat.
+        ('DEP-002', 'TESTUSER3', 'TESTUSER4')
+) AS mapping(dependency_id, preparer_adid, approver_adid)
+JOIN users prep ON prep.adid = mapping.preparer_adid
+JOIN users appr ON appr.adid = mapping.approver_adid
+ON CONFLICT (dependency_id) DO UPDATE
+    SET preparer_adid    = EXCLUDED.preparer_adid,
+        preparer_user_id = EXCLUDED.preparer_user_id,
+        approver_adid    = EXCLUDED.approver_adid,
+        approver_user_id = EXCLUDED.approver_user_id,
+        team_id          = EXCLUDED.team_id,
+        is_active        = TRUE,
+        updated_at       = NOW();
+
+-- Remove stale DEP-003 (sundarn1) — replaced by DEP-001.
+-- NOTE: DEP-002 was also stale (TEST04) and used to be deleted here. The id is
+-- now reused above for the DEMOPREPARER → DEMOAPPROVER pair, so deleting it
+-- would silently undo that insert. Only DEP-003 is stale now.
+DELETE FROM jde_user_dependency_mapping
+WHERE dependency_id = 'DEP-003';
+
+
+
+-- =============================================================================
+-- FILE: 09_role_external_mapping.sql
+-- =============================================================================
+-- =============================================================================
+-- Seed: 09_role_external_mapping.sql
+-- Maps external system role codes (JDE/LDAP) to internal role_code values
+-- as defined in Architecture Section 14.9.
+-- Depends on: 01_roles.sql
+-- Idempotent: ON CONFLICT (external_role_code, source_system) DO UPDATE.
+-- =============================================================================
+
+INSERT INTO role_external_mapping (
+    mapping_id,
+    external_role_code,
+    normalized_external_role_code,
+    internal_role_code,
+    source_system,
+    description,
+    is_active,
+    created_at,
+    updated_at
+) VALUES
+    (
+        'REM-001',
+        'BLPREPARER',
+        'BLPREPARER',
+        'PREPARER',
+        'JDE',
+        'JDE role BLPREPARER maps to internal Preparer role',
+        TRUE,
+        NOW(),
+        NOW()
+    ),
+    (
+        'REM-002',
+        'BLAPPROVER',
+        'BLAPPROVER',
+        'APPROVER',
+        'JDE',
+        'JDE role BLAPPROVER maps to internal Approver role',
+        TRUE,
+        NOW(),
+        NOW()
+    ),
+    (
+        'REM-003',
+        'BLADMIN',
+        'BLADMIN',
+        'LOCAL_ADMIN',
+        'JDE',
+        'JDE role BLADMIN maps to internal Local Admin role',
+        TRUE,
+        NOW(),
+        NOW()
+    )
+ON CONFLICT (external_role_code, source_system) DO UPDATE
+    SET normalized_external_role_code = EXCLUDED.normalized_external_role_code,
+        internal_role_code            = EXCLUDED.internal_role_code,
+        description                   = EXCLUDED.description,
+        is_active                     = TRUE,
+        updated_at                    = NOW();
+
+
+
+-- =============================================================================
+-- FILE: 10_app_config.sql
+-- =============================================================================
+-- =============================================================================
+-- Seed: 10_app_config.sql
+-- Key/value application configuration as defined in Architecture Section 14.10.
+-- Idempotent: ON CONFLICT (config_key) DO UPDATE.
+-- =============================================================================
+
+INSERT INTO app_config (config_key, config_value, description, is_active, created_at, updated_at) VALUES
+    (
+        'pilot_env_label',
+        '[Pilot]',
+        'Badge shown in the header to identify this as a pilot environment',
+        TRUE, NOW(), NOW()
+    ),
+    (
+        'require_journal_reviewer',
+        'false',
+        'Phase 1: reviewer certification flow is deferred; reviewer can view/comment only',
+        TRUE, NOW(), NOW()
+    ),
+    (
+        'max_file_upload_mb',
+        '50',
+        'Maximum allowed journal upload file size in megabytes',
+        TRUE, NOW(), NOW()
+    ),
+    (
+        'session_timeout_minutes',
+        '480',
+        'Idle session timeout in minutes (8 hours)',
+        TRUE, NOW(), NOW()
+    )
+ON CONFLICT (config_key) DO UPDATE
+    SET config_value = EXCLUDED.config_value,
+        description  = EXCLUDED.description,
+        is_active    = TRUE,
+        updated_at   = NOW();
+
+
+
+-- =============================================================================
+-- FILE: 11_company_news.sql
+-- =============================================================================
+-- =============================================================================
+-- Seed: 11_company_news.sql
+-- Initial company news entries for the Home page Company News card.
+-- Defined in Architecture Section 14.11.
+-- created_by references users.user_id for sysadmin (USR-SYSA-001).
+-- Depends on: 02_users.sql
+-- Idempotent: ON CONFLICT (news_id) DO NOTHING.
+-- =============================================================================
+
+INSERT INTO company_news (news_id, news_date, headline, body_text, created_by)
+SELECT
+    news.news_id,
+    news.news_date::DATE,
+    news.headline,
+    news.body_text,
+    u.user_id
+FROM (
+    VALUES
+        (
+            'NEWS-001',
+            '2022-12-19',
+            'Journal Certification Pilot Launched',
+            'The Journal Certification Pilot application is now live for EMEA Finance team. Please direct any issues to your Local Admin.'
+        ),
+        (
+            'NEWS-002',
+            '2026-08-01',
+            'Period 7 2026 Open for Certification',
+            'Period 7 2026 journals are now available in the system. Preparers: please certify by the deadline.'
+        )
+) AS news(news_id, news_date, headline, body_text)
+JOIN users u ON u.username = 'sysadmin'
+ON CONFLICT (news_id) DO NOTHING;
+
+
+
+-- =============================================================================
+-- FILE: 12_dependent_validation.sql
+-- =============================================================================
+-- =============================================================================
+-- Seed: 12_dependent_validation.sql
+-- Initial journal field validation rules for the Dependent Validation admin page.
+-- Defined in Architecture Section 14.12.
+-- Constrains which field combinations are valid in an uploaded journal file.
+-- Idempotent: ON CONFLICT (validation_id) DO NOTHING.
+-- =============================================================================
+
+INSERT INTO dependent_validation (
+    validation_id,
+    field_name,
+    field_value,
+    dependent_field_name,
+    dependent_field_value,
+    source_system
+) VALUES
+    ('DV-001', 'batch_type', 'G',    'ledger_type',   'AA',  'SEED'),
+    ('DV-002', 'batch_type', 'G',    'document_type', 'SA',  'SEED'),
+    ('DV-003', 'region',     'EMEA', 'currency',      'GBP', 'SEED'),
+    ('DV-004', 'region',     'APAC', 'currency',      'AUD', 'SEED'),
+    ('DV-005', 'batch_type', 'V',    'ledger_type',   'AA',  'SEED')
+ON CONFLICT (validation_id) DO NOTHING;
+
+
+
+-- =============================================================================
+-- FILE: 13_role_capabilities.sql
+-- =============================================================================
+-- Role capability seed data — run after schema.sql (table DDL is in schema.sql 9.27)
+-- and after 01_roles.sql (FK to roles.role_code must exist).
+-- Idempotent: ON CONFLICT ... DO UPDATE.
+
+-- Seed rows
+INSERT INTO role_capabilities (role_code, capability) VALUES
+    -- certify_as_preparer
+    ('PREPARER',       'certify_as_preparer'),
+    ('LOCAL_ADMIN',    'certify_as_preparer'),
+    ('BUSINESS_ADMIN', 'certify_as_preparer'),
+    ('SYSTEM_ADMIN',   'certify_as_preparer'),
+
+    -- certify_as_approver
+    ('APPROVER',       'certify_as_approver'),
+    ('LOCAL_ADMIN',    'certify_as_approver'),
+    ('BUSINESS_ADMIN', 'certify_as_approver'),
+    ('SYSTEM_ADMIN',   'certify_as_approver'),
+
+    -- add_comment
+    ('PREPARER',           'add_comment'),
+    ('APPROVER',           'add_comment'),
+    ('REVIEWER',           'add_comment'),
+    ('FINANCIAL_REVIEWER', 'add_comment'),
+    ('ACCOUNT_REVIEWER',   'add_comment'),
+    ('FINANCIAL_MANAGER',  'add_comment'),
+    ('ACCOUNT_MANAGER',    'add_comment'),
+    ('INTERNAL_AUDITOR',   'add_comment'),
+    ('EXECUTIVE',          'add_comment'),
+    ('CFO',                'add_comment'),
+    ('CONSULTANT',         'add_comment'),
+    ('LOCAL_ADMIN',        'add_comment'),
+    ('BUSINESS_ADMIN',     'add_comment'),
+    ('SYSTEM_ADMIN',       'add_comment'),
+
+    -- add_document
+    ('PREPARER',       'add_document'),
+    ('APPROVER',       'add_document'),
+    ('LOCAL_ADMIN',    'add_document'),
+    ('BUSINESS_ADMIN', 'add_document'),
+    ('SYSTEM_ADMIN',   'add_document'),
+
+    -- add_hyperlink
+    ('PREPARER',       'add_hyperlink'),
+    ('APPROVER',       'add_hyperlink'),
+    ('LOCAL_ADMIN',    'add_hyperlink'),
+    ('BUSINESS_ADMIN', 'add_hyperlink'),
+    ('SYSTEM_ADMIN',   'add_hyperlink'),
+
+    -- view_all_journals
+    ('LOCAL_ADMIN',    'view_all_journals'),
+    ('BUSINESS_ADMIN', 'view_all_journals'),
+    ('SYSTEM_ADMIN',   'view_all_journals'),
+
+    -- upload_file
+    ('LOCAL_ADMIN',    'upload_file'),
+    ('BUSINESS_ADMIN', 'upload_file'),
+    ('SYSTEM_ADMIN',   'upload_file'),
+
+    -- manage_users
+    ('SYSTEM_ADMIN',   'manage_users'),
+
+    -- decertify (PREPARER retracts from CERTIFIED; admins can also force-decertify)
+    ('PREPARER',       'decertify'),
+    ('SYSTEM_ADMIN',   'decertify'),
+    ('LOCAL_ADMIN',    'decertify'),
+    ('BUSINESS_ADMIN', 'decertify'),
+
+    -- validate_journal (admin moves NOT_PREPARED → PREPARED, releasing the
+    -- journal into the preparer's work queue).
+    -- Role set mirrors constants.roles.ADMIN_ROLES, which is what
+    -- services/journal_service.validate_journal() actually enforces. The UI
+    -- previously showed this action to SYSTEM_ADMIN only, so LOCAL_ADMIN and
+    -- BUSINESS_ADMIN could validate through the API but had no button.
+    ('LOCAL_ADMIN',    'validate_journal'),
+    ('BUSINESS_ADMIN', 'validate_journal'),
+    ('SYSTEM_ADMIN',   'validate_journal')
+
+ON CONFLICT (role_code, capability) DO UPDATE
+    SET is_active  = EXCLUDED.is_active,
+        updated_at = NOW();
+
+
+
+-- =============================================================================
+-- FILE: 14_test_journals.sql
+-- =============================================================================
+-- =============================================================================
+-- Seed: 14_test_journals.sql
+-- Deterministic journal fixture for row-scope, role-swap and hand-off tests.
+--
+-- Three groups, no journal shared between them:
+--
+--   TJ-A*  testuser1 prepares, testuser2 approves
+--   TJ-S*  the SAME two people with the seats REVERSED —
+--          testuser2 prepares, testuser1 approves
+--   TJ-B*  testuser3 prepares, testuser4 approves (single-role control)
+--
+-- TJ-S* is the important one. Without a role-swapped pair, "scoped by user" and
+-- "scoped by (user, active role)" produce identical results and the distinction
+-- cannot be tested. With it:
+--
+--   testuser1 acting as PREPARER → sees TJ-A*, must NOT see TJ-S*
+--   testuser1 acting as APPROVER → sees TJ-S*, must NOT see TJ-A*
+--
+-- Statuses cover every gate: a journal awaiting the preparer, one handed off to
+-- the approver (so the preparer must be read-only), and a terminal one.
+--
+--   TJ-A1  NOT_PREPARED   testuser1's to-do (prepare)
+--   TJ-A2  PREPARED       handed off — read-only for testuser1, to-do for testuser2
+--   TJ-A3  APPROVED       terminal — read-only for both assignees
+--   TJ-S1  NOT_PREPARED   testuser2's to-do (prepare); testuser1 approves later
+--   TJ-S2  PREPARED       testuser1's to-do (approve)
+--   TJ-B1  PREPARED       testuser4's to-do
+--   TJ-B2  REJECTED       testuser3 must re-certify
+--
+-- Depends on: 02_users.sql, 01_roles.sql, 04_teams.sql
+-- Idempotent: ON CONFLICT DO UPDATE / DO NOTHING throughout.
+-- =============================================================================
+
+-- ── Carrier file-load row (journal_header.source_file_id is NOT NULL) ────────
+INSERT INTO journal_file_load (
+    file_load_id,
+    original_file_name,
+    file_extension,
+    mime_type,
+    file_size_bytes,
+    file_content,
+    source_type,
+    total_rows,
+    valid_rows,
+    invalid_rows,
+    journals_created,
+    status,
+    uploaded_by,
+    uploaded_role,
+    uploaded_at,
+    processed_at
+) VALUES (
+    'FL-TEST-SCOPE-001',
+    'scope_test_fixture.txt',
+    'txt',
+    'text/plain',
+    0,
+    '\x00'::bytea,          -- placeholder; nothing re-parses this fixture
+    'MANUAL_UPLOAD',
+    5, 5, 0, 5,
+    'PARSE_SUCCESS',
+    'USR-SYSA-001',
+    'SYSTEM_ADMIN',
+    NOW(),
+    NOW()
+)
+ON CONFLICT (file_load_id) DO UPDATE
+    SET status       = EXCLUDED.status,
+        processed_at = NOW(),
+        updated_at   = NOW();
+
+
+-- ── Journal headers ─────────────────────────────────────────────────────────
+INSERT INTO journal_header (
+    journal_id,
+    source_file_id,
+    document_type,
+    document_number,
+    gl_date,
+    journal_period,
+    period_number,
+    fiscal_year,
+    batch_id,
+    batch_date,
+    ledger_type,
+    company_code,
+    batch_type,
+    currency,
+    exchange_rate,
+    region,
+    bl_currency_rate_usd,
+    total_debit,
+    total_credit,
+    total_debit_usd,
+    total_credit_usd,
+    baxter_id,
+    template,
+    team_id,
+    posting_status,
+    status,
+    is_active,
+    created_by,
+    created_at,
+    updated_at
+)
+SELECT
+    j.journal_id,
+    'FL-TEST-SCOPE-001',
+    'JE',
+    j.document_number,
+    DATE '2026-07-31',
+    '07/2026',
+    7,
+    26,
+    j.batch_id,
+    DATE '2026-07-31',
+    'AA',
+    j.company_code,
+    'G',
+    j.currency,
+    0,
+    j.region,
+    0.68615,
+    j.amount,
+    -j.amount,
+    ROUND(j.amount * 0.68615, 2),
+    ROUND(-j.amount * 0.68615, 2),
+    j.baxter_id,
+    'Generic',
+    'TEAM-EMEA-001',
+    'POSTED',
+    j.status,
+    TRUE,
+    'USR-SYSA-001',
+    NOW(),
+    NOW()
+FROM (
+    VALUES
+        ('TJ-A1', 'DOC-TA1', '90000001', '03501', 'AUD', 'APAC',     150.00, 'BX_TA1', 'NOT_PREPARED'),
+        ('TJ-A2', 'DOC-TA2', '90000002', '03501', 'AUD', 'APAC',     250.00, 'BX_TA2', 'PREPARED'),
+        ('TJ-A3', 'DOC-TA3', '90000003', '03501', 'USD', 'AMERICAS', 350.00, 'BX_TA3', 'APPROVED'),
+        ('TJ-B1', 'DOC-TB1', '90000004', '07200', 'EUR', 'EMEA',     450.00, 'BX_TB1', 'PREPARED'),
+        ('TJ-B2', 'DOC-TB2', '90000005', '07200', 'EUR', 'EMEA',     550.00, 'BX_TB2', 'REJECTED'),
+        -- Role-swapped pair (see the assignment block below)
+        ('TJ-S1', 'DOC-TS1', '90000006', '03501', 'AUD', 'APAC',     650.00, 'BX_TS1', 'NOT_PREPARED'),
+        ('TJ-S2', 'DOC-TS2', '90000007', '03501', 'AUD', 'APAC',     750.00, 'BX_TS2', 'PREPARED')
+) AS j(journal_id, document_number, batch_id, company_code, currency, region, amount, baxter_id, status)
+ON CONFLICT (journal_id) DO UPDATE
+    SET status     = EXCLUDED.status,
+        region     = EXCLUDED.region,
+        currency   = EXCLUDED.currency,
+        is_active  = TRUE,
+        updated_at = NOW();
+
+
+-- ── Assignments — this is what the my_journals CTE scopes on ────────────────
+-- Pair A journals go to USR-PREP-001 / USR-APPR-001.
+-- Pair B journals go to USR-PREP-002 / USR-APPR-002. No overlap, by design.
+INSERT INTO journal_assignment (
+    assignment_id,
+    journal_id,
+    role_code,
+    assigned_user_id,
+    sequence_number,
+    assignment_status,
+    assigned_by,
+    assigned_at,
+    created_at,
+    updated_at
+)
+SELECT
+    a.assignment_id,
+    a.journal_id,
+    a.role_code,
+    a.assigned_user_id,
+    a.sequence_number,
+    'ASSIGNED',
+    'USR-SYSA-001',
+    NOW(),
+    NOW(),
+    NOW()
+FROM (
+    VALUES
+        -- Pair A
+        ('ASG-TA1-P', 'TJ-A1', 'PREPARER', 'USR-PREP-001', 1),
+        ('ASG-TA1-A', 'TJ-A1', 'APPROVER', 'USR-APPR-001', 2),
+        ('ASG-TA2-P', 'TJ-A2', 'PREPARER', 'USR-PREP-001', 1),
+        ('ASG-TA2-A', 'TJ-A2', 'APPROVER', 'USR-APPR-001', 2),
+        ('ASG-TA3-P', 'TJ-A3', 'PREPARER', 'USR-PREP-001', 1),
+        ('ASG-TA3-A', 'TJ-A3', 'APPROVER', 'USR-APPR-001', 2),
+        -- Pair B
+        ('ASG-TB1-P', 'TJ-B1', 'PREPARER', 'USR-PREP-002', 1),
+        ('ASG-TB1-A', 'TJ-B1', 'APPROVER', 'USR-APPR-002', 2),
+        ('ASG-TB2-P', 'TJ-B2', 'PREPARER', 'USR-PREP-002', 1),
+        ('ASG-TB2-A', 'TJ-B2', 'APPROVER', 'USR-APPR-002', 2),
+
+        -- ── Role-swapped pair — the same two people, roles reversed ────────
+        -- On TJ-A* Preparer Demo prepares and Approver Demo approves. Here the
+        -- assignments are inverted. This is the shape that distinguishes
+        -- "scoped by user" from "scoped by (user, active role)":
+        --
+        --   Preparer Demo acting as PREPARER  → must NOT see TJ-S1/TJ-S2
+        --   Preparer Demo acting as APPROVER  → sees them, and TJ-S2 is theirs
+        --                                       to approve (status PREPARED)
+        --
+        -- Without this pair both readings produce identical results, so the
+        -- distinction is asserted rather than tested.
+        ('ASG-TS1-P', 'TJ-S1', 'PREPARER', 'USR-APPR-001', 1),
+        ('ASG-TS1-A', 'TJ-S1', 'APPROVER', 'USR-PREP-001', 2),
+        ('ASG-TS2-P', 'TJ-S2', 'PREPARER', 'USR-APPR-001', 1),
+        ('ASG-TS2-A', 'TJ-S2', 'APPROVER', 'USR-PREP-001', 2)
+) AS a(assignment_id, journal_id, role_code, assigned_user_id, sequence_number)
+ON CONFLICT (journal_id, role_code) DO UPDATE
+    SET assigned_user_id = EXCLUDED.assigned_user_id,
+        updated_at       = NOW();
+
+
+
+-- =============================================================================
+-- FILE: 20_account_rules.sql
+-- =============================================================================
+-- =============================================================================
+-- Seed: 20_account_rules.sql
+-- Account-module business rules and account-specific rejection reasons.
+--
+-- Dependencies: 01_roles.sql, 02_users.sql, 05_rejection_reasons.sql
+--               (rejection_reason_master and account_rule tables must exist)
+--
+-- Idempotency:
+--   account_rule           -> ON CONFLICT (rule_id)    DO UPDATE
+--   rejection_reason_master -> ON CONFLICT (reason_code) DO UPDATE
+--   Running this file twice produces no errors and no duplicate rows.
+-- =============================================================================
+
+-- --- Account rule: Zero-Balance No-Activity auto-certification ---
+-- This is rule #1 in the generic cross-module rule-engine pattern.
+-- The scope_json predicate config is evaluated by zero_balance_evaluator.py:
+--   balance_is_zero  = abs(gl_account_balance or 0) <= zero_tolerance
+--   no_activity      = not require_no_activity or activity_in_period is False
+--   type_match       = applies_to_assignment_type is None
+--                      or assignment_type == applies_to_assignment_type
+--   system_certify   = balance_is_zero and no_activity and type_match
+INSERT INTO account_rule (
+    rule_id,
+    rule_type,
+    rule_name,
+    description,
+    scope_json,
+    is_active,
+    created_at,
+    updated_at
+) VALUES (
+    'ZERO_BAL_NO_ACTIVITY',
+    'ZERO_BALANCE_AUTO_CERT',
+    'Zero Balance - No Activity',
+    'Automatically certifies an account reconciliation when the GL balance is zero '
+    '(or null treated as zero) and no activity occurred in the period. '
+    'Applies to assignment type A (Account Reconciliation) only.',
+    '{"require_zero_balance":true,"treat_null_as_zero":true,"require_no_activity":true,"zero_tolerance":0,"applies_to_assignment_type":"A"}',
+    TRUE,
+    NOW(),
+    NOW()
+)
+ON CONFLICT (rule_id) DO UPDATE
+    SET rule_type   = EXCLUDED.rule_type,
+        rule_name   = EXCLUDED.rule_name,
+        description = EXCLUDED.description,
+        scope_json  = EXCLUDED.scope_json,
+        is_active   = EXCLUDED.is_active,
+        updated_at  = NOW();
+
+-- --- Account-specific rejection reasons ---
+-- The shared journal reasons (MISSING_SUPPORT, INCORRECT_AMOUNT,
+-- INCORRECT_ACCOUNT, INSUFFICIENT_COMMENT, OTHER) are already seeded in
+-- 05_rejection_reasons.sql and apply to account reconciliation as well.
+-- The four codes below are account-specific and not duplicated in that file.
+INSERT INTO rejection_reason_master (reason_code, reason_text, is_active, created_at, updated_at) VALUES
+    ('UNRECONCILED_DIFFERENCE', 'Unexplained reconciling difference remains outstanding', TRUE, NOW(), NOW()),
+    ('STALE_RECONCILING_ITEMS', 'Reconciling items are stale or aged beyond the allowed policy period', TRUE, NOW(), NOW()),
+    ('UNSUPPORTED_BALANCE',     'GL balance is not supported by the provided documentation',    TRUE, NOW(), NOW()),
+    ('POLICY_VIOLATION',        'Reconciliation does not comply with applicable company policy', TRUE, NOW(), NOW())
+ON CONFLICT (reason_code) DO UPDATE
+    SET reason_text = EXCLUDED.reason_text,
+        is_active   = EXCLUDED.is_active,
+        updated_at  = NOW();
+
+
+
+-- =============================================================================
+-- FILE: 21_account_config.sql
+-- =============================================================================
+-- =============================================================================
+-- Seed: 21_account_config.sql
+-- Application configuration keys for the Account Reconciliation module.
+-- Spec reference: Section 28 (Application Configuration).
+--
+-- Dependencies: 10_app_config.sql (app_config table must exist)
+--
+-- Idempotency:
+--   ON CONFLICT (config_key) DO UPDATE
+--   Running this file twice produces no errors; values are kept current.
+-- =============================================================================
+
+INSERT INTO app_config (config_key, config_value, description, is_active, created_at, updated_at) VALUES
+    (
+        'account_recon_enabled',
+        'true',
+        'Master toggle for the Account Reconciliation module; set false to disable the entire module without deleting data',
+        TRUE, NOW(), NOW()
+    ),
+    (
+        'account_file_expected_columns',
+        '22',
+        'Number of columns expected in each row of the accounts import file (BL_Accounts_Import_Template)',
+        TRUE, NOW(), NOW()
+    ),
+    (
+        'account_file_delimiter',
+        'TAB',
+        'Field delimiter used in the accounts import file: TAB or COMMA',
+        TRUE, NOW(), NOW()
+    ),
+    (
+        'account_zero_balance_active_rule',
+        'ZERO_BAL_NO_ACTIVITY',
+        'rule_id (account_rule.rule_id) of the active zero-balance auto-certification rule',
+        TRUE, NOW(), NOW()
+    ),
+    (
+        'account_admin_manual_assignment',
+        'true',
+        'When true, System Admin must manually assign Preparer and Approver from the admin queue after file upload',
+        TRUE, NOW(), NOW()
+    ),
+    (
+        'ai_validation_enabled',
+        'true',
+        'Master toggle for AI Excel-vs-Screen discrepancy validation; set false to disable without removing data',
+        TRUE, NOW(), NOW()
+    ),
+    (
+        'ai_validation_amount_tolerance',
+        '0.01',
+        'Maximum absolute difference in reporting currency before the AI flags an amount as a discrepancy',
+        TRUE, NOW(), NOW()
+    ),
+    (
+        'account_alternate_currency_default',
+        'USD',
+        'Default alternate currency shown on account reconciliation headers; account_reconciliation.alternate_currency_display is sourced from this key',
+        TRUE, NOW(), NOW()
+    )
+ON CONFLICT (config_key) DO UPDATE
+    SET config_value = EXCLUDED.config_value,
+        description  = EXCLUDED.description,
+        is_active    = TRUE,
+        updated_at   = NOW();
+
+
+
+-- =============================================================================
+-- FILE: 22_account_cert_statements.sql
+-- =============================================================================
+-- =============================================================================
+-- Seed: 22_account_cert_statements.sql
+-- Certification statement configuration for the Account Reconciliation module.
+-- Spec reference: Section 16.4 (Certification Statement).
+--
+-- DISCRIMINATOR COLUMN IN certification_statement_config
+-- ---------------------------------------------------------
+-- The existing table (created in schema.sql section 9.19) had no module column.
+-- Without one, adding an ACCOUNT row for PREPARER would create two active rows
+-- for the same role_code, breaking any query that selects the active statement
+-- by role_code alone (e.g. SELECT ... WHERE role_code = 'PREPARER' AND
+-- is_active = TRUE would return both the JOURNAL and ACCOUNT rows).
+--
+-- Resolution (schema.sql only -- CLAUDE.md rule 3 keeps DDL out of seed files):
+--   column: module VARCHAR(50) NOT NULL DEFAULT 'JOURNAL'
+--   added to CREATE TABLE block (fresh DB) and via ADD COLUMN IF NOT EXISTS (upgrade)
+--   both in backend/sql/schema.sql section 9.19.
+--
+-- The DEFAULT 'JOURNAL' silently tags every pre-existing journal row without
+-- touching those rows.  New account rows carry module = 'ACCOUNT'.  Application
+-- code that queries this table must now include a module filter:
+--   WHERE role_code = :role AND module = :module AND is_active = TRUE
+--
+-- Run backend/seed/run_seed.py --schema to apply schema.sql before seeds.
+-- The --schema path guarantees the module column exists before this INSERT runs.
+-- ---------------------------------------------------------
+--
+-- Dependencies: 01_roles.sql, 06_cert_statement_config.sql (journal rows must
+--               already exist so the module DEFAULT tags them correctly)
+--
+-- Idempotency:
+--   ON CONFLICT (statement_id) DO UPDATE
+--   Running this file twice produces no errors and no duplicate rows.
+-- =============================================================================
+
+-- Account Reconciliation certification statements
+-- (schema.sql --schema run guarantees the module column exists before this block)
+INSERT INTO certification_statement_config (
+    statement_id,
+    role_code,
+    module,
+    statement_text,
+    policy_number,
+    policy_url,
+    is_active
+) VALUES
+    -- Preparer statement (spec 16.4 intent: account reconciled, items supported,
+    -- documentation complete, complies with policy)
+    (
+        'STMT-ACCT-PREP-001',
+        'PREPARER',
+        'ACCOUNT',
+        'I certify that this account reconciliation is complete, that all reconciling items are valid and appropriately supported, that supporting documentation is accurate and complete, and that this reconciliation complies with applicable company policy.',
+        '1105B',
+        'https://baxter.sharepoint.com/policies/1105B',
+        TRUE
+    ),
+    -- Approver statement (spec 16.4 intent: reviewed reconciliation and docs,
+    -- account is accurate and complete, complies with policy)
+    (
+        'STMT-ACCT-APPR-001',
+        'APPROVER',
+        'ACCOUNT',
+        'I have reviewed this account reconciliation and the supporting documentation and certify that the reconciliation is accurate and complete and that my approval is in accordance with applicable company policy.',
+        '1105B',
+        'https://baxter.sharepoint.com/policies/1105B',
+        TRUE
+    ),
+    -- System statement (spec 16.4 intent: met zero-balance rule, certified
+    -- automatically by system, no human action required)
+    (
+        'STMT-ACCT-SYS-001',
+        'SYSTEM_ADMIN',
+        'ACCOUNT',
+        'This account reconciliation was automatically certified by the system. The account met the configured Zero-Balance System Certification rule: the GL account balance was zero (or null treated as zero) and no activity occurred in the period. No Preparer or Approver action was required or performed.',
+        NULL,
+        NULL,
+        TRUE
+    )
+ON CONFLICT (statement_id) DO UPDATE
+    SET role_code      = EXCLUDED.role_code,
+        module         = EXCLUDED.module,
+        statement_text = EXCLUDED.statement_text,
+        policy_number  = EXCLUDED.policy_number,
+        policy_url     = EXCLUDED.policy_url,
+        is_active      = EXCLUDED.is_active,
+        updated_at     = NOW();
+
+
+
+-- =============================================================================
+-- FILE: 23_account_capabilities.sql
+-- =============================================================================
+-- =============================================================================
+-- Seed: 23_account_capabilities.sql
+-- Account Reconciliation and AI validation capabilities seeded into the
+-- existing role_capabilities framework.
+-- Spec reference: Sections 25.2 (capabilities) and 25.3 (role mapping).
+--
+-- Dependencies: 01_roles.sql (FK to roles.role_code must exist),
+--               13_role_capabilities.sql (table must exist)
+--
+-- Idempotency:
+--   ON CONFLICT (role_code, capability) DO UPDATE
+--   Running this file twice produces no errors and no duplicate rows.
+--
+-- Capability -> role matrix (13 capabilities, spec 25.2 / 25.3):
+--
+--  upload_account_file        LOCAL_ADMIN, BUSINESS_ADMIN, SYSTEM_ADMIN
+--  view_account_admin_queue   LOCAL_ADMIN, BUSINESS_ADMIN, SYSTEM_ADMIN
+--  assign_account_recon       LOCAL_ADMIN, BUSINESS_ADMIN, SYSTEM_ADMIN
+--  certify_account_as_preparer PREPARER, LOCAL_ADMIN, BUSINESS_ADMIN, SYSTEM_ADMIN
+--  certify_account_as_approver APPROVER, LOCAL_ADMIN, BUSINESS_ADMIN, SYSTEM_ADMIN
+--  reject_account             APPROVER, LOCAL_ADMIN, BUSINESS_ADMIN, SYSTEM_ADMIN
+--  decertify_account          PREPARER, LOCAL_ADMIN, BUSINESS_ADMIN, SYSTEM_ADMIN
+--  add_account_item           PREPARER, LOCAL_ADMIN, BUSINESS_ADMIN, SYSTEM_ADMIN
+--  add_account_document       PREPARER, APPROVER, LOCAL_ADMIN, BUSINESS_ADMIN, SYSTEM_ADMIN
+--  add_account_comment        all 16 roles except API_ACCESS
+--  add_account_hyperlink      PREPARER, APPROVER, LOCAL_ADMIN, BUSINESS_ADMIN, SYSTEM_ADMIN
+--  view_all_account_recons    read-only roles + admin roles (see below)
+--  run_ai_validation          PREPARER, APPROVER, read-only roles + admin roles
+-- =============================================================================
+
+INSERT INTO role_capabilities (role_code, capability) VALUES
+
+    -- upload_account_file: admin roles only (file upload is an admin operation)
+    ('LOCAL_ADMIN',    'upload_account_file'),
+    ('BUSINESS_ADMIN', 'upload_account_file'),
+    ('SYSTEM_ADMIN',   'upload_account_file'),
+
+    -- view_account_admin_queue: admin roles see the unassigned reconciliation queue
+    ('LOCAL_ADMIN',    'view_account_admin_queue'),
+    ('BUSINESS_ADMIN', 'view_account_admin_queue'),
+    ('SYSTEM_ADMIN',   'view_account_admin_queue'),
+
+    -- assign_account_recon: admin roles perform the manual assignment
+    ('LOCAL_ADMIN',    'assign_account_recon'),
+    ('BUSINESS_ADMIN', 'assign_account_recon'),
+    ('SYSTEM_ADMIN',   'assign_account_recon'),
+
+    -- certify_account_as_preparer: preparer role + admin roles (emergency)
+    ('PREPARER',       'certify_account_as_preparer'),
+    ('LOCAL_ADMIN',    'certify_account_as_preparer'),
+    ('BUSINESS_ADMIN', 'certify_account_as_preparer'),
+    ('SYSTEM_ADMIN',   'certify_account_as_preparer'),
+
+    -- certify_account_as_approver: approver role + admin roles (emergency)
+    ('APPROVER',       'certify_account_as_approver'),
+    ('LOCAL_ADMIN',    'certify_account_as_approver'),
+    ('BUSINESS_ADMIN', 'certify_account_as_approver'),
+    ('SYSTEM_ADMIN',   'certify_account_as_approver'),
+
+    -- reject_account: approver role + admin roles
+    ('APPROVER',       'reject_account'),
+    ('LOCAL_ADMIN',    'reject_account'),
+    ('BUSINESS_ADMIN', 'reject_account'),
+    ('SYSTEM_ADMIN',   'reject_account'),
+
+    -- decertify_account: preparer retracts own certification; admins force-decertify
+    ('PREPARER',       'decertify_account'),
+    ('LOCAL_ADMIN',    'decertify_account'),
+    ('BUSINESS_ADMIN', 'decertify_account'),
+    ('SYSTEM_ADMIN',   'decertify_account'),
+
+    -- add_account_item: preparer adds reconciling items; admins can also add
+    ('PREPARER',       'add_account_item'),
+    ('LOCAL_ADMIN',    'add_account_item'),
+    ('BUSINESS_ADMIN', 'add_account_item'),
+    ('SYSTEM_ADMIN',   'add_account_item'),
+
+    -- add_account_document: preparer, approver, and admins upload supporting docs
+    ('PREPARER',       'add_account_document'),
+    ('APPROVER',       'add_account_document'),
+    ('LOCAL_ADMIN',    'add_account_document'),
+    ('BUSINESS_ADMIN', 'add_account_document'),
+    ('SYSTEM_ADMIN',   'add_account_document'),
+
+    -- add_account_comment: all roles that can view a reconciliation may comment
+    ('PREPARER',           'add_account_comment'),
+    ('APPROVER',           'add_account_comment'),
+    ('REVIEWER',           'add_account_comment'),
+    ('FINANCIAL_REVIEWER', 'add_account_comment'),
+    ('ACCOUNT_REVIEWER',   'add_account_comment'),
+    ('FINANCIAL_MANAGER',  'add_account_comment'),
+    ('ACCOUNT_MANAGER',    'add_account_comment'),
+    ('INTERNAL_AUDITOR',   'add_account_comment'),
+    ('EXECUTIVE',          'add_account_comment'),
+    ('CFO',                'add_account_comment'),
+    ('EXTERNAL_AUDITOR',   'add_account_comment'),
+    ('CONSULTANT',         'add_account_comment'),
+    ('LOCAL_ADMIN',        'add_account_comment'),
+    ('BUSINESS_ADMIN',     'add_account_comment'),
+    ('SYSTEM_ADMIN',       'add_account_comment'),
+
+    -- add_account_hyperlink: preparer, approver, and admins may add hyperlinks
+    ('PREPARER',       'add_account_hyperlink'),
+    ('APPROVER',       'add_account_hyperlink'),
+    ('LOCAL_ADMIN',    'add_account_hyperlink'),
+    ('BUSINESS_ADMIN', 'add_account_hyperlink'),
+    ('SYSTEM_ADMIN',   'add_account_hyperlink'),
+
+    -- view_all_account_recons: read-only roles plus admin roles
+    -- (PREPARER and APPROVER see only their assigned records, not all)
+    ('REVIEWER',           'view_all_account_recons'),
+    ('FINANCIAL_REVIEWER', 'view_all_account_recons'),
+    ('ACCOUNT_REVIEWER',   'view_all_account_recons'),
+    ('FINANCIAL_MANAGER',  'view_all_account_recons'),
+    ('ACCOUNT_MANAGER',    'view_all_account_recons'),
+    ('INTERNAL_AUDITOR',   'view_all_account_recons'),
+    ('EXECUTIVE',          'view_all_account_recons'),
+    ('CFO',                'view_all_account_recons'),
+    ('EXTERNAL_AUDITOR',   'view_all_account_recons'),
+    ('CONSULTANT',         'view_all_account_recons'),
+    ('LOCAL_ADMIN',        'view_all_account_recons'),
+    ('BUSINESS_ADMIN',     'view_all_account_recons'),
+    ('SYSTEM_ADMIN',       'view_all_account_recons'),
+
+    -- run_ai_validation: workflow roles + all read-access roles (spec 25.3)
+    ('PREPARER',           'run_ai_validation'),
+    ('APPROVER',           'run_ai_validation'),
+    ('REVIEWER',           'run_ai_validation'),
+    ('FINANCIAL_REVIEWER', 'run_ai_validation'),
+    ('ACCOUNT_REVIEWER',   'run_ai_validation'),
+    ('FINANCIAL_MANAGER',  'run_ai_validation'),
+    ('ACCOUNT_MANAGER',    'run_ai_validation'),
+    ('INTERNAL_AUDITOR',   'run_ai_validation'),
+    ('EXECUTIVE',          'run_ai_validation'),
+    ('CFO',                'run_ai_validation'),
+    ('EXTERNAL_AUDITOR',   'run_ai_validation'),
+    ('CONSULTANT',         'run_ai_validation'),
+    ('LOCAL_ADMIN',        'run_ai_validation'),
+    ('BUSINESS_ADMIN',     'run_ai_validation'),
+    ('SYSTEM_ADMIN',       'run_ai_validation')
+
+ON CONFLICT (role_code, capability) DO UPDATE
+    SET is_active  = EXCLUDED.is_active,
+        updated_at = NOW();
+
+
+
+-- =============================================================================
+-- FILE: 24_account_test_data.sql
+-- =============================================================================
+-- =============================================================================
+-- Seed: 24_account_test_data.sql
+-- Deterministic test fixtures for the Account Reconciliation module.
+-- Covers ALL SEVEN FSM statuses: NOT_ASSIGNED, NOT_PREPARED, PREPARED,
+-- APPROVED, REJECTED, DECERTIFIED, SYSTEM_CERTIFIED.
+--
+-- Dependencies:
+--   01_roles.sql            (role_code FKs)
+--   02_users.sql            (user_id FKs -- uses USR-PREP-001..USR-SYSA-001)
+--   03_user_roles.sql       (user-role assignments for narrative accuracy)
+--   04_teams.sql            (TEAM-EMEA-001 must exist)
+--   05_rejection_reasons.sql (MISSING_SUPPORT reason_code referenced)
+--   20_account_rules.sql    (ZERO_BAL_NO_ACTIVITY rule_id referenced)
+--
+-- Users used (from 02_users.sql / 03_user_roles.sql):
+--   USR-PREP-001  testuser1   PREPARER + APPROVER   dual-role
+--   USR-APPR-001  testuser2   PREPARER + APPROVER   dual-role
+--   USR-PREP-002  testuser3   PREPARER
+--   USR-APPR-002  testuser4   APPROVER
+--   USR-LADM-001  localadmin  LOCAL_ADMIN + PREPARER
+--   USR-SYSA-001  systemadmin SYSTEM_ADMIN
+--
+-- Presence-flag coverage:
+--   has_items    TRUE  on AR-TEST-003 (PREPARED)      -- one account_recon_item
+--   has_comments TRUE  on AR-TEST-002 (NOT_PREPARED)  -- one account_comment
+--   has_documents TRUE on AR-TEST-004 (APPROVED)      -- one account_document
+--   All three flags are FALSE on all remaining reconciliations.
+--
+-- SoD (segregation of duties): preparer != approver on every assigned recon.
+--   AR-TEST-002/005: testuser3 (PREPARER)  vs testuser4 (APPROVER)
+--   AR-TEST-003/006: testuser1 (PREPARER)  vs testuser2 (APPROVER)
+--   AR-TEST-004:     testuser3 (PREPARER)  vs testuser4 (APPROVER)
+--
+-- Idempotency:
+--   account_file_load      -> ON CONFLICT (file_load_id)      DO NOTHING
+--   account_reconciliation -> ON CONFLICT (reconciliation_id) DO NOTHING
+--   account_assignment     -> ON CONFLICT (reconciliation_id, role_code) DO NOTHING
+--   account_certification  -> ON CONFLICT (certification_id)  DO NOTHING
+--   account_recon_item     -> ON CONFLICT (item_id)           DO NOTHING
+--   account_comment        -> ON CONFLICT (comment_id)        DO NOTHING
+--   account_document       -> ON CONFLICT (document_id)       DO NOTHING
+--   Running this file twice produces no errors and no duplicate rows.
+-- =============================================================================
+
+
+-- =============================================================================
+-- Parent file-load row (FK for all reconciliations in this batch)
+-- =============================================================================
+INSERT INTO account_file_load (
+    file_load_id,
+    original_file_name,
+    file_content,
+    source_type,
+    delimiter,
+    expected_column_count,
+    total_rows,
+    valid_rows,
+    invalid_rows,
+    accounts_created,
+    system_certified_count,
+    status,
+    uploaded_by,
+    uploaded_role,
+    uploaded_at,
+    processed_at,
+    created_at,
+    updated_at
+) VALUES (
+    'AFL-TEST-2025-08',
+    'BL_Accounts_Import_Aug2025.txt',
+    ''::bytea,          -- placeholder: real uploads store raw file bytes
+    'MANUAL_UPLOAD',
+    'TAB',
+    22,
+    7,
+    7,
+    0,
+    6,
+    1,
+    'PARSE_SUCCESS',
+    'USR-SYSA-001',
+    'SYSTEM_ADMIN',
+    '2025-08-31 09:00:00+00',
+    '2025-08-31 09:00:05+00',
+    NOW(),
+    NOW()
+)
+ON CONFLICT (file_load_id) DO NOTHING;
+
+
+-- =============================================================================
+-- Seven account_reconciliation rows, one per FSM status
+-- UNIQUE constraint: (entity_unique_id, account_number, period_end_date,
+--                     account_currency) -- each row uses a distinct account_number
+-- =============================================================================
+INSERT INTO account_reconciliation (
+    reconciliation_id,
+    source_file_id,
+    entity_unique_id,
+    account_number,
+    account_description,
+    assignment_type,
+    account_type,
+    active_account,
+    activity_in_period,
+    account_currency,
+    period_end_date,
+    period_label,
+    gl_account_balance,
+    gl_account_balance_usd,
+    bl_currency_rate_usd,
+    account_name,
+    risk_rating,
+    reconciliation_frequency,
+    alternate_currency_display,
+    company_code,
+    region,
+    team_id,
+    template,
+    preparer_user_id,
+    approver_user_id,
+    has_items,
+    has_comments,
+    has_documents,
+    status,
+    is_zero_balance,
+    auto_cert_rule_id,
+    is_completed,
+    closed_at,
+    created_by,
+    created_at,
+    updated_at
+) VALUES
+
+-- -- 1. NOT_ASSIGNED -----------------------------------------------------------
+(
+    'AR-TEST-001',
+    'AFL-TEST-2025-08',
+    'ENT-EMEA-001',
+    '10010-001',
+    'Cash and Bank - EMEA Current Account',
+    'A',
+    'ASSET',
+    TRUE,
+    TRUE,
+    'USD',
+    '2025-08-31',
+    '08/2025',
+    15420.00,
+    15420.00,
+    1.0,
+    'Cash and Bank - EMEA Current Account',
+    'LOW',
+    'MONTHLY',
+    'USD',
+    'EMEA-01',
+    'EMEA',
+    'TEAM-EMEA-001',
+    'Account Reconciliation',
+    NULL,
+    NULL,
+    FALSE,
+    FALSE,
+    FALSE,
+    'NOT_ASSIGNED',
+    FALSE,
+    NULL,
+    FALSE,
+    NULL,
+    'USR-SYSA-001',
+    NOW(),
+    NOW()
+),
+
+-- -- 2. NOT_PREPARED ----------------------------------------------------------
+-- Admin has assigned preparer (testuser3) and approver (testuser4).
+-- Preparer has not yet acted.  has_comments=TRUE because a comment was added
+-- by the admin during assignment (see account_comment below).
+(
+    'AR-TEST-002',
+    'AFL-TEST-2025-08',
+    'ENT-EMEA-001',
+    '10020-001',
+    'Accounts Receivable - Trade',
+    'A',
+    'ASSET',
+    TRUE,
+    TRUE,
+    'USD',
+    '2025-08-31',
+    '08/2025',
+    87500.00,
+    87500.00,
+    1.0,
+    'Accounts Receivable - Trade',
+    'MEDIUM',
+    'MONTHLY',
+    'USD',
+    'EMEA-01',
+    'EMEA',
+    'TEAM-EMEA-001',
+    'Account Reconciliation',
+    'USR-PREP-002',
+    'USR-APPR-002',
+    FALSE,
+    TRUE,
+    FALSE,
+    'NOT_PREPARED',
+    FALSE,
+    NULL,
+    FALSE,
+    NULL,
+    'USR-SYSA-001',
+    NOW(),
+    NOW()
+),
+
+-- -- 3. PREPARED --------------------------------------------------------------
+-- Preparer (testuser1) has certified.  has_items=TRUE (one reconciling item).
+(
+    'AR-TEST-003',
+    'AFL-TEST-2025-08',
+    'ENT-EMEA-001',
+    '10030-001',
+    'Prepaid Expenses',
+    'A',
+    'ASSET',
+    TRUE,
+    TRUE,
+    'USD',
+    '2025-08-31',
+    '08/2025',
+    32200.00,
+    32200.00,
+    1.0,
+    'Prepaid Expenses',
+    'LOW',
+    'MONTHLY',
+    'USD',
+    'EMEA-01',
+    'EMEA',
+    'TEAM-EMEA-001',
+    'Account Reconciliation',
+    'USR-PREP-001',
+    'USR-APPR-001',
+    TRUE,
+    FALSE,
+    FALSE,
+    'PREPARED',
+    FALSE,
+    NULL,
+    FALSE,
+    NULL,
+    'USR-SYSA-001',
+    NOW(),
+    NOW()
+),
+
+-- -- 4. APPROVED --------------------------------------------------------------
+-- Approver (testuser4) has approved.  has_documents=TRUE (one supporting doc).
+(
+    'AR-TEST-004',
+    'AFL-TEST-2025-08',
+    'ENT-EMEA-001',
+    '10040-001',
+    'Accrued Liabilities',
+    'A',
+    'LIABILITY',
+    TRUE,
+    TRUE,
+    'USD',
+    '2025-08-31',
+    '08/2025',
+    -44100.00,
+    -44100.00,
+    1.0,
+    'Accrued Liabilities',
+    'HIGH',
+    'MONTHLY',
+    'USD',
+    'EMEA-01',
+    'EMEA',
+    'TEAM-EMEA-001',
+    'Account Reconciliation',
+    'USR-PREP-002',
+    'USR-APPR-002',
+    FALSE,
+    FALSE,
+    TRUE,
+    'APPROVED',
+    FALSE,
+    NULL,
+    TRUE,
+    NOW(),
+    'USR-SYSA-001',
+    NOW(),
+    NOW()
+),
+
+-- -- 5. REJECTED --------------------------------------------------------------
+-- Approver (testuser4) rejected.  Preparer (testuser3) must re-certify.
+(
+    'AR-TEST-005',
+    'AFL-TEST-2025-08',
+    'ENT-EMEA-001',
+    '10050-001',
+    'Deferred Revenue',
+    'A',
+    'LIABILITY',
+    TRUE,
+    TRUE,
+    'USD',
+    '2025-08-31',
+    '08/2025',
+    -18600.00,
+    -18600.00,
+    1.0,
+    'Deferred Revenue',
+    'MEDIUM',
+    'MONTHLY',
+    'USD',
+    'EMEA-01',
+    'EMEA',
+    'TEAM-EMEA-001',
+    'Account Reconciliation',
+    'USR-PREP-002',
+    'USR-APPR-002',
+    FALSE,
+    FALSE,
+    FALSE,
+    'REJECTED',
+    FALSE,
+    NULL,
+    FALSE,
+    NULL,
+    'USR-SYSA-001',
+    NOW(),
+    NOW()
+),
+
+-- -- 6. DECERTIFIED -----------------------------------------------------------
+-- Preparer (testuser1) retracted the certification.  Must re-certify.
+(
+    'AR-TEST-006',
+    'AFL-TEST-2025-08',
+    'ENT-EMEA-001',
+    '10060-001',
+    'Goodwill',
+    'A',
+    'ASSET',
+    TRUE,
+    TRUE,
+    'USD',
+    '2025-08-31',
+    '08/2025',
+    200000.00,
+    200000.00,
+    1.0,
+    'Goodwill',
+    'HIGH',
+    'MONTHLY',
+    'USD',
+    'EMEA-01',
+    'EMEA',
+    'TEAM-EMEA-001',
+    'Account Reconciliation',
+    'USR-PREP-001',
+    'USR-APPR-001',
+    FALSE,
+    FALSE,
+    FALSE,
+    'DECERTIFIED',
+    FALSE,
+    NULL,
+    FALSE,
+    NULL,
+    'USR-SYSA-001',
+    NOW(),
+    NOW()
+),
+
+-- -- 7. SYSTEM_CERTIFIED ------------------------------------------------------
+-- Zero balance, no activity.  Auto-certified by the system per spec 8.4:
+--   is_zero_balance=TRUE, auto_cert_rule_id='ZERO_BAL_NO_ACTIVITY',
+--   gl_account_balance=0, activity_in_period=FALSE,
+--   preparer_user_id=NULL, approver_user_id=NULL (never enters the queue),
+--   is_completed=TRUE, closed_at set.
+(
+    'AR-TEST-007',
+    'AFL-TEST-2025-08',
+    'ENT-EMEA-001',
+    '10070-001',
+    'Dormant Suspense Account',
+    'A',
+    'ASSET',
+    TRUE,
+    FALSE,
+    'USD',
+    '2025-08-31',
+    '08/2025',
+    0.00,
+    0.00,
+    1.0,
+    'Dormant Suspense Account',
+    'NONE',
+    'MONTHLY',
+    'USD',
+    'EMEA-01',
+    'EMEA',
+    'TEAM-EMEA-001',
+    'Account Reconciliation',
+    NULL,
+    NULL,
+    FALSE,
+    FALSE,
+    FALSE,
+    'SYSTEM_CERTIFIED',
+    TRUE,
+    'ZERO_BAL_NO_ACTIVITY',
+    TRUE,
+    NOW(),
+    'USR-SYSA-001',
+    NOW(),
+    NOW()
+)
+
+ON CONFLICT (reconciliation_id) DO NOTHING;
+
+
+-- =============================================================================
+-- account_assignment rows
+-- UNIQUE(reconciliation_id, role_code) and UNIQUE(reconciliation_id, sequence_number)
+-- Assigned by localadmin (USR-LADM-001) in role LOCAL_ADMIN.
+-- SoD is satisfied on every fixture: preparer_user_id != approver_user_id.
+-- AR-TEST-001 (NOT_ASSIGNED) and AR-TEST-007 (SYSTEM_CERTIFIED) have no assignments.
+-- =============================================================================
+INSERT INTO account_assignment (
+    assignment_id,
+    reconciliation_id,
+    role_code,
+    assigned_user_id,
+    sequence_number,
+    assignment_status,
+    assigned_by,
+    assigned_at,
+    created_at,
+    updated_at
+) VALUES
+
+-- AR-TEST-002 NOT_PREPARED
+('ASSIGN-002-PREP', 'AR-TEST-002', 'PREPARER', 'USR-PREP-002', 1, 'ASSIGNED',  'USR-LADM-001', NOW(), NOW(), NOW()),
+('ASSIGN-002-APPR', 'AR-TEST-002', 'APPROVER', 'USR-APPR-002', 2, 'ASSIGNED',  'USR-LADM-001', NOW(), NOW(), NOW()),
+
+-- AR-TEST-003 PREPARED
+('ASSIGN-003-PREP', 'AR-TEST-003', 'PREPARER', 'USR-PREP-001', 1, 'COMPLETED', 'USR-LADM-001', NOW(), NOW(), NOW()),
+('ASSIGN-003-APPR', 'AR-TEST-003', 'APPROVER', 'USR-APPR-001', 2, 'ASSIGNED',  'USR-LADM-001', NOW(), NOW(), NOW()),
+
+-- AR-TEST-004 APPROVED
+('ASSIGN-004-PREP', 'AR-TEST-004', 'PREPARER', 'USR-PREP-002', 1, 'COMPLETED', 'USR-LADM-001', NOW(), NOW(), NOW()),
+('ASSIGN-004-APPR', 'AR-TEST-004', 'APPROVER', 'USR-APPR-002', 2, 'COMPLETED', 'USR-LADM-001', NOW(), NOW(), NOW()),
+
+-- AR-TEST-005 REJECTED
+('ASSIGN-005-PREP', 'AR-TEST-005', 'PREPARER', 'USR-PREP-002', 1, 'ASSIGNED',  'USR-LADM-001', NOW(), NOW(), NOW()),
+('ASSIGN-005-APPR', 'AR-TEST-005', 'APPROVER', 'USR-APPR-002', 2, 'ASSIGNED',  'USR-LADM-001', NOW(), NOW(), NOW()),
+
+-- AR-TEST-006 DECERTIFIED
+('ASSIGN-006-PREP', 'AR-TEST-006', 'PREPARER', 'USR-PREP-001', 1, 'ASSIGNED',  'USR-LADM-001', NOW(), NOW(), NOW()),
+('ASSIGN-006-APPR', 'AR-TEST-006', 'APPROVER', 'USR-APPR-001', 2, 'ASSIGNED',  'USR-LADM-001', NOW(), NOW(), NOW())
+
+ON CONFLICT (reconciliation_id, role_code) DO NOTHING;
+
+
+-- =============================================================================
+-- account_certification rows (IMMUTABLE)
+-- certification_id is the business key: UNIQUE NOT NULL.
+-- =============================================================================
+INSERT INTO account_certification (
+    certification_id,
+    reconciliation_id,
+    assignment_id,
+    role_code,
+    action,
+    certification_status,
+    certification_statement,
+    comments,
+    reason_code,
+    rejection_reason_text,
+    is_system,
+    is_bulk,
+    performed_by,
+    performed_by_display,
+    performed_at,
+    created_at
+) VALUES
+
+-- AR-TEST-003 PREPARED: preparer certified
+(
+    'CERT-003-PREP',
+    'AR-TEST-003',
+    'ASSIGN-003-PREP',
+    'PREPARER',
+    'CERTIFY',
+    'PREPARED',
+    'I certify that this account reconciliation is complete, that all reconciling items are valid and appropriately supported, that supporting documentation is accurate and complete, and that this reconciliation complies with applicable company policy.',
+    NULL,
+    NULL,
+    NULL,
+    FALSE,
+    FALSE,
+    'USR-PREP-001',
+    'Test User 1',
+    NOW(),
+    NOW()
+),
+
+-- AR-TEST-004 APPROVED: preparer certified then approver approved
+(
+    'CERT-004-PREP',
+    'AR-TEST-004',
+    'ASSIGN-004-PREP',
+    'PREPARER',
+    'CERTIFY',
+    'PREPARED',
+    'I certify that this account reconciliation is complete, that all reconciling items are valid and appropriately supported, that supporting documentation is accurate and complete, and that this reconciliation complies with applicable company policy.',
+    NULL,
+    NULL,
+    NULL,
+    FALSE,
+    FALSE,
+    'USR-PREP-002',
+    'Test User 3',
+    NOW(),
+    NOW()
+),
+(
+    'CERT-004-APPR',
+    'AR-TEST-004',
+    'ASSIGN-004-APPR',
+    'APPROVER',
+    'APPROVE',
+    'APPROVED',
+    'I have reviewed this account reconciliation and the supporting documentation and certify that the reconciliation is accurate and complete and that my approval is in accordance with applicable company policy.',
+    NULL,
+    NULL,
+    NULL,
+    FALSE,
+    FALSE,
+    'USR-APPR-002',
+    'Test User 4',
+    NOW(),
+    NOW()
+),
+
+-- AR-TEST-005 REJECTED: preparer certified then approver rejected
+(
+    'CERT-005-PREP',
+    'AR-TEST-005',
+    'ASSIGN-005-PREP',
+    'PREPARER',
+    'CERTIFY',
+    'PREPARED',
+    'I certify that this account reconciliation is complete, that all reconciling items are valid and appropriately supported, that supporting documentation is accurate and complete, and that this reconciliation complies with applicable company policy.',
+    NULL,
+    NULL,
+    NULL,
+    FALSE,
+    FALSE,
+    'USR-PREP-002',
+    'Test User 3',
+    NOW(),
+    NOW()
+),
+(
+    'CERT-005-APPR',
+    'AR-TEST-005',
+    'ASSIGN-005-APPR',
+    'APPROVER',
+    'REJECT',
+    'REJECTED',
+    NULL,
+    'Supporting documentation does not reconcile to the GL balance.',
+    'MISSING_SUPPORT',
+    'Missing supporting documentation',
+    FALSE,
+    FALSE,
+    'USR-APPR-002',
+    'Test User 4',
+    NOW(),
+    NOW()
+),
+
+-- AR-TEST-006 DECERTIFIED: preparer certified then decertified
+(
+    'CERT-006-PREP',
+    'AR-TEST-006',
+    'ASSIGN-006-PREP',
+    'PREPARER',
+    'CERTIFY',
+    'PREPARED',
+    'I certify that this account reconciliation is complete, that all reconciling items are valid and appropriately supported, that supporting documentation is accurate and complete, and that this reconciliation complies with applicable company policy.',
+    NULL,
+    NULL,
+    NULL,
+    FALSE,
+    FALSE,
+    'USR-PREP-001',
+    'Test User 1',
+    NOW(),
+    NOW()
+),
+(
+    'CERT-006-DECE',
+    'AR-TEST-006',
+    'ASSIGN-006-PREP',
+    'PREPARER',
+    'DECERTIFY',
+    'DECERTIFIED',
+    NULL,
+    'Identified an error in the reconciling items; retracting to correct.',
+    NULL,
+    NULL,
+    FALSE,
+    FALSE,
+    'USR-PREP-001',
+    'Test User 1',
+    NOW(),
+    NOW()
+),
+
+-- AR-TEST-007 SYSTEM_CERTIFIED: auto-certified by zero-balance rule (spec 8.4)
+-- performed_by=NULL, performed_by_display='System', is_system=TRUE
+-- assignment_id=NULL (system-certified recons never enter the assignment queue)
+(
+    'CERT-007-SYS',
+    'AR-TEST-007',
+    NULL,
+    'SYSTEM',
+    'SYSTEM_CERTIFY',
+    'SYSTEM_CERTIFIED',
+    'This account reconciliation was automatically certified by the system. The account met the configured Zero-Balance System Certification rule: the GL account balance was zero (or null treated as zero) and no activity occurred in the period. No Preparer or Approver action was required or performed.',
+    NULL,
+    NULL,
+    NULL,
+    TRUE,
+    FALSE,
+    NULL,
+    'System',
+    NOW(),
+    NOW()
+)
+
+ON CONFLICT (certification_id) DO NOTHING;
+
+
+-- =============================================================================
+-- account_recon_item (exercises has_items=TRUE on AR-TEST-003)
+-- =============================================================================
+INSERT INTO account_recon_item (
+    item_id,
+    reconciliation_id,
+    line_number,
+    item_type,
+    item_description,
+    item_reference,
+    item_amount,
+    item_amount_usd,
+    item_currency,
+    item_date,
+    aging_bucket,
+    is_required_adjustment,
+    is_active,
+    created_by,
+    created_role,
+    created_at,
+    updated_at
+) VALUES (
+    'ITEM-003-001',
+    'AR-TEST-003',
+    1,
+    'RECONCILING_ITEM',
+    'Payment in transit - vendor remittance not yet received by period end',
+    'PO-2025-08-4422',
+    1250.00,
+    1250.00,
+    'USD',
+    '2025-08-29',
+    '0-30',
+    FALSE,
+    TRUE,
+    'USR-PREP-001',
+    'PREPARER',
+    NOW(),
+    NOW()
+)
+ON CONFLICT (item_id) DO NOTHING;
+
+
+-- =============================================================================
+-- account_comment (exercises has_comments=TRUE on AR-TEST-002)
+-- =============================================================================
+INSERT INTO account_comment (
+    comment_id,
+    reconciliation_id,
+    comment_text,
+    comment_type,
+    role_code,
+    created_by,
+    is_edited,
+    recon_status_at_creation,
+    created_at,
+    updated_at
+) VALUES (
+    'COMM-002-001',
+    'AR-TEST-002',
+    'Awaiting supporting documentation from the regional finance team. Please attach the August bank statement and the trade AR aging report before certifying.',
+    'GENERAL',
+    'LOCAL_ADMIN',
+    'USR-LADM-001',
+    FALSE,
+    'NOT_PREPARED',
+    NOW(),
+    NOW()
+)
+ON CONFLICT (comment_id) DO NOTHING;
+
+
+-- =============================================================================
+-- account_document (exercises has_documents=TRUE on AR-TEST-004)
+-- file_content is a minimal placeholder; real documents store full BYTEA.
+-- =============================================================================
+INSERT INTO account_document (
+    document_id,
+    reconciliation_id,
+    original_file_name,
+    file_extension,
+    mime_type,
+    file_size_bytes,
+    file_content,
+    description,
+    is_validation_source,
+    uploaded_by,
+    uploaded_role,
+    uploaded_at,
+    status,
+    created_at,
+    updated_at
+) VALUES (
+    'DOC-004-001',
+    'AR-TEST-004',
+    'accrued_liabilities_support_aug2025.pdf',
+    'pdf',
+    'application/pdf',
+    0,
+    ''::bytea,
+    'Supporting schedule for accrued liabilities - August 2025',
+    FALSE,
+    'USR-PREP-002',
+    'PREPARER',
+    NOW(),
+    'ACTIVE',
+    NOW(),
+    NOW()
+)
+ON CONFLICT (document_id) DO NOTHING;
+
+
+-- =============================================================================
+-- account_rule_evaluation_log (IMMUTABLE)
+-- One evaluation row for the SYSTEM_CERTIFIED fixture showing the rule fired.
+-- =============================================================================
+INSERT INTO account_rule_evaluation_log (
+    eval_id,
+    rule_id,
+    record_ref,
+    outcome,
+    detail_json,
+    created_at
+) VALUES (
+    'EVAL-007-ZERO-001',
+    'ZERO_BAL_NO_ACTIVITY',
+    'AR-TEST-007',
+    'SYSTEM_CERTIFIED',
+    '{"gl_account_balance":0.00,"activity_in_period":false,"assignment_type":"A","balance_is_zero":true,"no_activity":true,"type_match":true,"decision":"SYSTEM_CERTIFY"}',
+    NOW()
+)
+ON CONFLICT (eval_id) DO NOTHING;
+
+
+
